@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises';
-import {authVerifier,firebaseWebConfig,hash,HttpError,membershipService} from './membership-core.mjs';
+import {firebaseWebConfig,hash,HttpError,membershipService} from './membership-core.mjs';
 import {configuredFirestore} from './firestore-store.mjs';
+import {authVerifier} from './firebase-token.mjs';
 
 const responseHeaders={'cache-control':'no-store','x-content-type-options':'nosniff'};
 const json=(value,status=200)=>Response.json(value,{status,headers:responseHeaders});

@@ -1,30 +1,10 @@
 import {createHash,createPrivateKey,createPublicKey,randomBytes,sign} from 'node:crypto';
-import {getAuth} from 'firebase-admin/auth';
-import {getApps,initializeApp} from 'firebase-admin/app';
 
 export class HttpError extends Error {
   constructor(status,message) { super(message); this.status=status; }
 }
 export const hash=value=>createHash('sha256').update(value).digest('hex');
 export const emailOf=value=>String(value ?? '').trim().toLowerCase();
-export function authVerifier(firebase) {
-  const name='drive-identity-'+firebase?.projectId;
-  const app=firebase && (getApps().find(app=>app.name===name) ?? initializeApp({projectId:firebase.projectId},name));
-  return async header=>{
-    const match=/^Bearer (\S+)$/.exec(header ?? '');
-    if (!match) throw new HttpError(401,'Entre para continuar.');
-    if (!app) throw new HttpError(503,'Login ainda não configurado.');
-    try {
-      const user=await getAuth(app).verifyIdToken(match[1]);
-      if (!user.email_verified || !user.email) throw new HttpError(403,'Confirme seu e-mail no provedor de login.');
-      return {uid:user.uid,email:emailOf(user.email)};
-    } catch (error) {
-      if (error instanceof HttpError) throw error;
-      if (error.code==='app/network-error' || error.code==='auth/internal-error') throw new HttpError(503,'Serviço de login temporariamente indisponível.');
-      throw new HttpError(401,'Sessão inválida. Entre novamente.');
-    }
-  };
-}
 export function firebaseWebConfig(env) {
   const {FIREBASE_PROJECT_ID:projectId,FIREBASE_AUTH_DOMAIN:authDomain,FIREBASE_API_KEY:apiKey,FIREBASE_APP_ID:appId}=env;
   return projectId && authDomain && apiKey && appId ? {projectId,authDomain,apiKey,appId} : null;
