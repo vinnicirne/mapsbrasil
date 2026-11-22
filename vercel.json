@@ -1,0 +1,22 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api/:endpoint(config|me|join|accept)",
+      "destination": "/api/bridge?endpoint=:endpoint"
+    },
+    {
+      "source": "/api/companies/:company/:action",
+      "destination": "/api/bridge?endpoint=companies/:company/:action"
+    },
+    {
+      "source": "/gestao",
+      "destination": "/index.html"
+    }
+  ],
+  "functions": {
+    "api/bridge.mjs": {
+      "includeFiles": "public/packs/rio-do-ouro.json"
+    }
+  }
+}

@@ -20,6 +20,7 @@ root.innerHTML=`
       <div class="access-symbol" aria-hidden="true">↗</div>
       <h1 id="access-title">Entre para navegar</h1>
       <p id="access-copy">Use seu e-mail verificado para acessar suas rotas e preparar o mapa offline.</p>
+      <button type="button" class="secondary wide" id="retry-service" hidden>Tentar novamente</button>
       <div id="login-group" hidden>
         <button type="button" class="primary wide" id="sign-in">Continuar com Google</button>
         <form id="email-login" hidden>
@@ -78,6 +79,7 @@ if (handoff.has('codigo')) $('code').value=handoff.get('codigo');
 const statusLabels={pending:'Pendente',approved:'Aprovado',rejected:'Recusado',revoked:'Revogado'};
 let config,auth,profile,company,snapshot,info,serverReachable=false;
 let refreshSequence=0;
+let apiResponded=false;
 const report=message=>{
   const text=message?.message ?? message ?? '';
   $('feedback').textContent=text;
@@ -106,19 +108,21 @@ const run=fn=>async event=>{
 };
 
 function renderNetwork() {
-  const online=navigator.onLine && serverReachable;
-  $('network').querySelector('span').textContent=online?'Online':'Offline';
+  const connected=navigator.onLine;
+  const online=connected && serverReachable;
+  $('network').querySelector('span').textContent=online?'Online':connected && apiResponded?'Serviço indisponível':'Offline';
   $('network').classList.toggle('offline',!online);
   navigatorUI.setNetwork(online);
 }
 function screen(name) {
   for (const id of ['welcome','workspace','management']) $(id).hidden=id!==name;
 }
-function accessScreen(title,copy,{login=false,join=false,verify=false}={}) {
+function accessScreen(title,copy,{login=false,join=false,verify=false,retry=false}={}) {
   screen('welcome');
   $('access-title').textContent=title;
   $('access-copy').textContent=copy;
   $('login-group').hidden=!login;
+  $('retry-service').hidden=!retry;
   $('join-group').hidden=!join;
   $('sign-in').hidden=!!config?.demo || !config?.firebase;
   $('email-login').hidden=$('sign-in').hidden;
@@ -152,10 +156,20 @@ function showSnapshot() {
   $('manage-link').hidden=true;
 }
 
+function showConnectionError() {
+  if (navigator.onLine && apiResponded) {
+    accessScreen('Serviço indisponível','O MapsBrasil Drive não conseguiu conectar ao serviço de login. Tente novamente em instantes.',{retry:true});
+  } else {
+    accessScreen('Aguardando conexão','Conecte-se para entrar, confirmar seu vínculo e preparar a primeira rota.',{retry:true});
+  }
+}
+
 async function boot() {
   try { snapshot=await loadSnapshot(); } catch(error) {report(error);}
+  apiResponded=false;
   try {
-    const result=await fetch('/api/config',{cache:'no-store',signal:AbortSignal.timeout(3500)});
+    const result=await fetch('/api/config',{cache:'no-store',signal:AbortSignal.timeout(10000)});
+    apiResponded=true;
     if (!result.ok) throw Error('Serviço indisponível.');
     config=await result.json();
     auth=await connectAuth(config);
@@ -167,7 +181,7 @@ async function boot() {
   } catch {
     serverReachable=false;
     if (snapshot && !isManagement && await allowsOffline(snapshot)) showSnapshot();
-    else accessScreen('Aguardando conexão','Conecte-se para entrar, confirmar seu vínculo e preparar a primeira rota.');
+    else showConnectionError();
     renderNetwork();
     return;
   }
@@ -198,8 +212,9 @@ async function refresh() {
       return;
     }
     serverReachable=false;
+    apiResponded=Boolean(error.status);
     if (snapshot && !isManagement && await allowsOffline(snapshot)) showSnapshot();
-    else accessScreen('Serviço indisponível','Conecte-se novamente para validar seu acesso.');
+    else showConnectionError();
     renderNetwork();
     return;
   }
@@ -363,6 +378,7 @@ $('accept-invite').onclick=run(async()=>{
   location.replace('/');
 });
 $('refresh').onclick=run(refresh);
+$('retry-service').onclick=run(boot);
 $('refresh-list').onclick=run(listMembers);
 $('managed-company').onchange=run(async()=>{$('invite-result').hidden=true;await listMembers();});
 $('company').onchange=run(async()=>{
@@ -388,7 +404,7 @@ const expireOffline=async()=>{
     accessScreen('Autorização offline expirada','Conecte-se para validar seu vínculo e retomar a navegação.');
   }
 };
-window.addEventListener('offline',()=>{serverReachable=false;renderNetwork();void expireOffline().catch(report);});
+window.addEventListener('offline',()=>{serverReachable=false;apiResponded=false;renderNetwork();void expireOffline().catch(report);});
 window.setInterval(()=>void expireOffline().catch(report),15000);
 window.addEventListener('online',run(async()=>{
   if (!auth) return boot();

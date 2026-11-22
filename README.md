@@ -49,6 +49,18 @@ O E2E usa um servidor local com banco temporário, dois contextos isolados de na
 - Configure `PILOT_PACK_PATH` com o caminho do pacote autorizado. A API libera o download somente para um vínculo aprovado. O pacote de demonstração distribuído no repositório é utilizável explicitamente no modo demo ou com `ALLOW_SAMPLE_PACK=1`. O PWA sinaliza dados simulados.
 - Homologue a cobertura viária, a voz e a geolocalização sem rede em veículos e aparelhos físicos. O navegador pode remover os dados locais. A tela exige baixar novamente quando o mapa for descartado pelo navegador. Valide os dados cartográficos antes de usar na operação.
 
+### API e Firestore na Vercel
+
+A implantação pode rodar o PWA e a API no mesmo projeto Vercel. O Auth do painel e o Firestore são configuráveis separadamente. O Firestore dedicado recebe apenas vínculos e convites do Drive. O frontend acessa essas informações pela API, com operações administrativas associadas aos UIDs configurados em `COMPANIES_JSON`.
+
+- `FIREBASE_PROJECT_ID`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_API_KEY` e `FIREBASE_APP_ID` configuram o provedor Firebase Auth. Autorize o domínio do PWA nesse provedor.
+- `FIRESTORE_PROJECT_ID` identifica o projeto de dados do Drive. Armazene a credencial de uma conta de serviço com papel Datastore User em `FIRESTORE_SERVICE_ACCOUNT_JSON`, como segredo da Vercel. A conta deve pertencer ao projeto configurado.
+- `DRIVE_LEASE_PRIVATE_KEY` recebe uma chave EC P-256 em PEM PKCS#8, como segredo da Vercel. Use uma chave distinta em homologação e produção e mantenha-a estável entre deploys do grupo.
+- `DRIVE_DATA_NAMESPACE` define a partição de vínculos e convites. Use valores diferentes em Preview e Production.
+- `ALLOW_SAMPLE_PACK=1` disponibiliza vias reais em Rio do Ouro e um polígono de risco simulado, identificado no PWA como demonstração.
+
+O backend local conserva o SQLite para demonstração independente. Para uma hospedagem separada, a ponte na Vercel também aceita `MAPSBRASIL_API_ORIGIN` quando `FIRESTORE_PROJECT_ID` estiver ausente.
+
 ## Gerar um pacote regional
 
 Forneça um extrato OSM JSON e o arquivo GeoJSON de risco autorizado. O extrato incluído corresponde à caixa de Rio do Ouro indicada no script. Para outra área, defina PACK_BOUNDS na ordem oeste,sul,leste,norte e PACK_REGION com o nome da região. Use fontes licenciadas para expansão e preserve a atribuição [OpenStreetMap contributors](https://www.openstreetmap.org/copyright).

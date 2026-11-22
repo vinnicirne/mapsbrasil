@@ -1,0 +1,10 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      // O navegador usa a API do Drive. O servidor acessa o banco por IAM.
+      allow read, write: if false;
+    }
+  }
+}

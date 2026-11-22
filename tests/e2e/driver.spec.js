@@ -135,3 +135,14 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await company.close();
   await driver.close();
 });
+
+test('frontend distingue API ausente de dispositivo offline e permite nova tentativa', async ({page})=>{
+  await page.route('**/api/config',route=>route.fulfill({status:404,body:'NOT_FOUND'}));
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Serviço indisponível'})).toBeVisible();
+  await expect(page.locator('#network')).toHaveText('Serviço indisponível');
+  await page.unroute('**/api/config');
+  await page.getByRole('button',{name:'Tentar novamente'}).click();
+  await expect(page.getByRole('heading',{name:'Entre para navegar'})).toBeVisible();
+  await expect(page.locator('#network')).toHaveText('Online');
+});
