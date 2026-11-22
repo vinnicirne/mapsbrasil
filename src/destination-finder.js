@@ -1,3 +1,5 @@
+const minimumQueryLength=3;
+
 export function createDestinationFinder(form,{find,select,navigate}) {
   const query=form.querySelector('input');
   const feedback=form.querySelector('[role="status"]');
@@ -32,11 +34,11 @@ export function createDestinationFinder(form,{find,select,navigate}) {
   query.addEventListener('input',event=>{
     clearResults();
     const address=query.value.trim();
-    if(!event.isComposing && address.length>=4) schedule(address,270);
+    if(!event.isComposing && address.length>=minimumQueryLength) schedule(address,270);
   });
   query.addEventListener('compositionend',()=>{
     const address=query.value.trim();
-    if(address.length>=4) schedule(address,270);
+    if(address.length>=minimumQueryLength) schedule(address,270);
   });
   function showMatches(matches,provisional=false) {
     results.replaceChildren();
@@ -109,7 +111,7 @@ export function createDestinationFinder(form,{find,select,navigate}) {
   form.onsubmit=event=>{
     event.preventDefault();
     const address=query.value.trim();
-    if(address.length<3) {
+    if(address.length<minimumQueryLength) {
       feedback.textContent='Digite pelo menos três caracteres do endereço.';
       return;
     }

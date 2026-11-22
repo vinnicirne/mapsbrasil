@@ -173,9 +173,9 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   const saoPaulo=[-46.658,-23.558];
   const destino=[-46.652,-23.562];
   await locate(driver,saoPaulo);
-  let searchCalls=0;
+  const searches=[];
   await page.route('**/api/companies/piloto/search',route=>{
-    searchCalls++;
+    searches.push(route.request().postDataJSON().query);
     return route.fulfill({json:[{
       id:'sp',name:'Avenida Paulista, 1578',locality:'São Paulo · SP',point:destino,precision:'address'
     }]});
@@ -188,12 +188,18 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
       maneuvers:[{at:0,kind:'straight',name:''},{at:900,kind:'arrive',name:'Avenida Paulista'}]
     }]}});
   });
-  await page.getByLabel('Para onde você vai?').fill('Avenida Paulista, 1578, São Paulo');
-  await expect(page.getByRole('button',{name:/Avenida Paulista, 1578.*São Paulo/})).toBeVisible();
-  await page.getByLabel('Para onde você vai?').clear();
-  await page.getByLabel('Para onde você vai?').fill('Avenida Paulista, 1578, São Paulo');
-  await page.getByRole('button',{name:/Avenida Paulista, 1578.*São Paulo/}).click();
-  expect(searchCalls).toBe(1);
+  const field=page.getByLabel('Para onde você vai?');
+  const result=page.getByRole('button',{name:/Avenida Paulista, 1578.*São Paulo/});
+  await field.fill('Ave');
+  await expect(result).toBeVisible();
+  expect(searches).toEqual(['Ave']);
+  const fullAddress='Avenida Paulista, 1578, São Paulo';
+  await field.fill(fullAddress);
+  await expect(result).toBeVisible();
+  await field.clear();
+  await field.fill(fullAddress);
+  await result.click();
+  expect(searches).toEqual(['Ave',fullAddress]);
   await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
   await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
   await driver.setOffline(true);

@@ -133,7 +133,11 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     find:async (address,{signal,preview})=>{
       const near=await Promise.race([locateSearch(),new Promise(resolve=>setTimeout(resolve,180))]);
       signal.throwIfAborted();
-      const local=findLocal?.(address,near) ?? [];
+      const bounds=pack?.bounds;
+      const localRegionNearby=!near || !bounds || distance(near,near.map((coordinate,axis)=>
+        Math.min(Math.max(coordinate,bounds[axis]),bounds[axis+2])
+      ))<=30000;
+      const local=(!connected || localRegionNearby) ? findLocal?.(address,near) ?? [] : [];
       if (!connected && !findLocal) throw Error('Abra o mapa da região com internet antes de pesquisar offline.');
       if (!connected || local.some(result=>result.precision==='address' || result.precision==='coordinate')) return local;
       const key=address.normalize().toLocaleLowerCase('pt-BR').replace(/\s+/g,' ')+'|'+(near?.join(',')??'');
