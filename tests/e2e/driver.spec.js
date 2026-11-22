@@ -22,6 +22,8 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   const manager=await company.newPage();
   const errors=[];
   page.on('pageerror',error=>errors.push(error.message));
+  const menu=page.getByRole('dialog',{name:'Rotas'});
+  const openMenu=page.getByRole('button',{name:'Abrir menu de rotas'});
   await page.goto('/');
   await expect(page).toHaveTitle(/MapsBrasil Drive/);
   await expect(page.getByRole('link',{name:'MapsBrasil Drive, início'})).toHaveText('MapsBrasil Drive');
@@ -43,13 +45,25 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
 
   await page.goto('/');
   await page.route('**/api/companies/piloto/search',route=>route.fulfill({json:[]}));
+  await expect(menu).toBeHidden();
+  const mapBounds=await page.getByRole('region',{name:'Mapa de navegação',exact:true}).boundingBox();
+  expect(mapBounds.width).toBe(390);
+  expect(mapBounds.y+mapBounds.height).toBe(844);
+  await openMenu.click();
+  await expect(menu).toBeVisible();
+  await menu.getByRole('button',{name:'Marcar origem'}).click();
+  await expect(page.getByText('Toque na sua origem no mapa.')).toBeVisible();
+  await page.getByRole('button',{name:'Cancelar',exact:true}).click();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(openMenu).toHaveAttribute('aria-expanded','false');
   await page.getByLabel('Para onde você vai?').fill('Rua Jorge Rachid, São Gonçalo');
-  await page.getByRole('button',{name:'Buscar',exact:true}).click();
   const localResult=page.getByRole('button',{name:/Rua Jorge Rachid.*Ponto aproximado/i});
   await localResult.click();
   await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
   await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
   await page.getByRole('button',{name:'Encerrar'}).click();
+  await openMenu.click();
   await expect(page.getByRole('button',{name:'Atualizar região'})).toBeVisible();
   await page.unroute('**/api/companies/piloto/search');
   await expect(page.getByText('Áreas de risco simuladas',{exact:true})).toBeVisible();
@@ -61,6 +75,10 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await driver.setOffline(true);
   await page.goto('/');
   await expect(page.locator('#network')).toHaveText('Offline');
+  await page.getByLabel('Para onde você vai?').fill('Rua Jorge Rachid, São Gonçalo');
+  await expect(localResult).toBeVisible();
+  await page.getByLabel('Para onde você vai?').clear();
+  await openMenu.click();
   await expect(page.locator('#itinerary')).toContainText('Entrega de teste');
   const offlineAudio=await page.evaluate(async()=>{
     const response=await fetch('/audio/left.wav');
@@ -73,6 +91,10 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await page.getByRole('button',{name:'Iniciar navegação',exact:true}).click();
   await expect(page.locator('#turn-name')).toHaveText('Vire à esquerda');
   await expect(page.locator('#travel-time')).toContainText('min');
+  await expect.poll(()=>page.locator('#map').evaluate(canvas=>{
+    const [r,g,b]=canvas.getContext('2d').getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1).data;
+    return [r,g,b];
+  })).toEqual([33,93,222]);
   await expect(page.getByRole('button',{name:'Encerrar'})).toBeInViewport();
   await page.screenshot({path:test.info().outputPath('navegacao-offline.png')});
 
@@ -123,6 +145,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(invite).toBeVisible();
   await page.goto(await invite.inputValue());
   await page.getByRole('button',{name:'Aceitar convite'}).click();
+  await openMenu.click();
   await page.getByRole('button',{name:'Baixar região'}).click();
   await expect(page.getByText('Região pronta para uso offline.')).toBeVisible();
   await locate(driver,origin);
@@ -155,7 +178,6 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
     }]}});
   });
   await page.getByLabel('Para onde você vai?').fill('Avenida Paulista, 1578, São Paulo');
-  await page.getByRole('button',{name:'Buscar',exact:true}).click();
   await page.getByRole('button',{name:/Avenida Paulista, 1578.*São Paulo/}).click();
   await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
   await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
@@ -163,6 +185,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await page.goto('/');
   await expect(page.locator('#itinerary')).toContainText('Avenida Paulista, 1578');
   await expect(page.getByText('Trajeto salvo · mapa de ruas indisponível offline')).toBeVisible();
+  await openMenu.click();
   await page.getByRole('button',{name:'Iniciar navegação',exact:true}).click();
   await expect(page.locator('#travel-distance')).toContainText('Parada 1');
   await company.close();

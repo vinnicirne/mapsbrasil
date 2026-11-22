@@ -2,6 +2,7 @@ import * as maplibregl from 'maplibre-gl';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {factionColors} from './navigation/factions.js';
+import {drawCar} from './car-marker.js';
 
 maplibregl.setWorkerUrl(workerUrl);
 
@@ -12,6 +13,15 @@ export function createNationalMap(container,onPoint,onReady) {
   const map=new maplibregl.Map({container,style:'https://tiles.openfreemap.org/styles/positron',
     center:[-51,-15],zoom:3.4,minZoom:2,maxZoom:19,attributionControl:false});
   map.addControl(new maplibregl.AttributionControl({compact:true,customAttribution:'<a href="https://www.openstreetmap.org/fixthemap">Corrigir o mapa</a>'}),'bottom-left');
+  const car=document.createElement('canvas');
+  car.className='car-marker';
+  car.width=64;car.height=80;
+  car.setAttribute('role','img');
+  car.setAttribute('aria-label','Veículo no mapa');
+  const context=car.getContext('2d');
+  context.setTransform(2,0,0,2,32,40);
+  drawCar(context);
+  const vehicle=new maplibregl.Marker({element:car,rotationAlignment:'map',pitchAlignment:'viewport'});
   let state={}, lastRoute, lastLeg, lastRisk, ready=false;
   map.on('click',event=>{if(!state.nav) onPoint([event.lngLat.lng,event.lngLat.lat]);});
   function update() {
@@ -31,12 +41,16 @@ export function createNationalMap(container,onPoint,onReady) {
       map.getSource('drive-route').setData(collection(lines));
     }
     const dots=[];
-    if(position) dots.push(feature('Point',position,{kind:'gps'}));
+    if(position && !nav) dots.push(feature('Point',position,{kind:'gps'}));
     if(origin) dots.push(feature('Point',origin,{kind:'origin'}));
     if(destination) dots.push(feature('Point',destination,{kind:'destination'}));
     if(route?.legs[legIndex]) dots.push(feature('Point',route.legs[legIndex].stop.point,{kind:'destination'}));
     map.getSource('drive-points').setData(collection(dots));
-    if(nav && position) map.easeTo({center:position,bearing:bearing??0,zoom:16.6,pitch:38,duration:350});
+    if(nav && position) {
+      vehicle.setLngLat(position).setRotation(bearing??0);
+      if(!car.isConnected) vehicle.addTo(map);
+      map.easeTo({center:position,bearing:bearing??0,zoom:16.6,pitch:38,duration:350});
+    } else if(car.isConnected) vehicle.remove();
   }
   map.on('load',()=>{
     for(const id of ['drive-risk','drive-route','drive-points']) map.addSource(id,{type:'geojson',data:collection([])});

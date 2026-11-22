@@ -1,4 +1,5 @@
 import {factionColors} from './navigation/factions.js';
+import {drawCar} from './car-marker.js';
 
 const radians=Math.PI/180;
 const limits=new WeakMap();
@@ -108,13 +109,12 @@ export function createMap(canvas, onPoint) {
       route.legs.forEach((leg,i)=>i>=legIndex && dot(leg.stop.point,'#254d91',String(i+1)));
     }
     if (origin && !nav) dot(origin,'#215646','');
-    if (destination && !route) dot(destination,'#254d91','');
+    if (destination && !nav) dot(destination,'#254d91','');
     if (position) {
       if (nav) {
         const [x,y]=screen(position);
         context.save();context.translate(x,y);context.rotate((bearing ?? 0)*radians+angle);
-        context.beginPath();context.moveTo(0,-14);context.lineTo(10,12);context.lineTo(0,8);context.lineTo(-10,12);context.closePath();
-        context.fillStyle='#215dde';context.strokeStyle='#fff';context.lineWidth=3;context.stroke();context.fill();
+        drawCar(context);
         context.restore();
       } else dot(position,'#2160d4','');
     }

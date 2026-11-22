@@ -89,6 +89,7 @@ let packLoad;
 const navigatorUI=makeNavigator($('navigation'),{download,prepareDestination,persist,reportError:report,
   searchNational:query=>apiFor('search',{method:'POST',body:{query}}),
   routeNational:(start,stops)=>apiFor('route',{method:'POST',body:{start,stops}})});
+$('route-menu-title').parentElement.after($('company').closest('.company-bar'));
 
 async function api(path,{method='GET',body,raw=false}={}) {
   const token=await auth?.token();

@@ -1,10 +1,11 @@
-export function createDestinationFinder(form,{load,select,navigate}) {
+export function createDestinationFinder(form,{find,select,navigate}) {
   const query=form.querySelector('input');
   const feedback=form.querySelector('[role="status"]');
   const results=form.querySelector('ul');
   const searchButton=form.querySelector('[type="submit"]');
   const go=form.querySelector('[data-go]');
   let target, sequence=0, starting=false;
+  let timer, lastSearch=0, searchedAddress, searching=false;
 
   function clearSelection() {
     target=undefined;
@@ -13,35 +14,42 @@ export function createDestinationFinder(form,{load,select,navigate}) {
   }
   function clearResults() {
     sequence++;
+    clearTimeout(timer);
+    searchedAddress=undefined;
+    searching=false;
     results.replaceChildren();
     clearSelection();
     feedback.textContent='';
-    searchButton.disabled=false;
   }
-  query.addEventListener('input',clearResults);
-
-  form.onsubmit=async event=>{
-    event.preventDefault();
-    if(starting) return;
+  function schedule(address,delay,retry=true) {
+    clearTimeout(timer);
+    timer=setTimeout(()=>void search(address,retry),Math.max(delay,1300-(Date.now()-lastSearch)));
+  }
+  query.addEventListener('input',event=>{
     clearResults();
     const address=query.value.trim();
-    if(address.length<3) {
-      feedback.textContent='Digite pelo menos três caracteres do endereço.';
-      return;
-    }
+    if(!event.isComposing && address.length>=4) schedule(address,650);
+  });
+  query.addEventListener('compositionend',()=>{
+    const address=query.value.trim();
+    if(address.length>=4) schedule(address,650);
+  });
+  async function search(address,retry) {
+    if(starting || searching || address===searchedAddress) return;
     const request=sequence;
-    searchButton.disabled=true;
+    lastSearch=Date.now();
+    searching=true;
     feedback.textContent='Procurando endereço…';
     try {
-      const find=await load();
-      if(request!==sequence) return;
       const matches=await find(address);
       if(request!==sequence) return;
+      searchedAddress=address;
       if(!matches.length) {
         feedback.textContent='Endereço sem correspondência. Confira rua, número e cidade. Sem internet, a busca usa a região baixada.';
         return;
       }
       feedback.textContent='Escolha o destino abaixo.';
+      select(matches[0]);
       for (const match of matches) {
         const item=document.createElement('li');
         const choice=document.createElement('button');
@@ -56,6 +64,7 @@ export function createDestinationFinder(form,{load,select,navigate}) {
         choice.append(name,detail);
         choice.onclick=()=>{
           target=match;
+          searchedAddress=match.name;
           query.value=match.name;
           results.replaceChildren();
           feedback.textContent=(match.precision==='street'?'Confira o ponto aproximado no mapa. ':'')+(select(match) ?? '');
@@ -66,10 +75,21 @@ export function createDestinationFinder(form,{load,select,navigate}) {
         results.append(item);
       }
     } catch(error) {
-      if(request===sequence) feedback.textContent=error.message;
+      if(request!==sequence) return;
+      if(error.status===429 && retry) schedule(address,1300,false);
+      else feedback.textContent=error.message;
     } finally {
-      if(request===sequence) searchButton.disabled=false;
+      if(request===sequence) searching=false;
     }
+  }
+  form.onsubmit=event=>{
+    event.preventDefault();
+    const address=query.value.trim();
+    if(address.length<3) {
+      feedback.textContent='Digite pelo menos três caracteres do endereço.';
+      return;
+    }
+    if (!starting && !searching && address!==searchedAddress) schedule(address,0);
   };
   go.onclick=async()=>{
     if(!target || starting) return;

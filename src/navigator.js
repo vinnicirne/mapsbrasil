@@ -11,8 +11,8 @@ const directions={left:'Vire à esquerda',right:'Vire à direita',straight:'Siga
 const audioFiles={start:'/audio/start.wav',left:'/audio/left.wav',right:'/audio/right.wav',straight:'/audio/straight.wav',uturn:'/audio/uturn.wav',arrive:'/audio/arrive.wav',risk:'/audio/risk.wav'};
 const formatDistance = value => value>=1000 ? (value/1000).toFixed(1).replace('.',',')+' km' : Math.max(0,Math.round(value/10)*10)+' m';
 const outputTemplate=`
-  <aside class="route-panel" aria-label="Preparar rota">
-    <div class="route-title"><span class="label">NAVEGAÇÃO</span><h1>Sua próxima rota</h1><p>Busque um destino no Brasil ou prepare uma lista de entregas.</p></div>
+  <dialog class="route-panel" id="route-menu" aria-labelledby="route-menu-title">
+    <div class="route-title"><h1 id="route-menu-title">Rotas</h1><button id="close-route-menu" class="icon-button close-menu" type="button" aria-label="Fechar menu de rotas" autofocus>×</button></div>
     <section class="pack-card">
       <div class="pack-top"><span class="download-icon" aria-hidden="true">⇩</span><div><h2>Mapa offline</h2><p id="pack-info">Selecione sua empresa para continuar.</p></div></div>
       <button class="secondary wide" id="download" type="button">Baixar região</button>
@@ -32,19 +32,21 @@ const outputTemplate=`
       <ol id="itinerary"></ol>
     </section>
     <p class="fine">Mantenha o PWA visível para receber alertas. O GPS é usado durante a navegação.</p>
-  </aside>
+  </dialog>
   <section class="map-wrap" aria-label="Mapa de navegação">
     <div id="national-map" role="region" aria-label="Mapa de navegação do Brasil" hidden></div>
     <canvas id="map" aria-label="Mapa da região e da rota" role="img"></canvas>
     <div class="map-empty" id="map-empty"><strong>Seu trajeto aparece aqui</strong><span>Carregando a região disponível.</span></div>
+    <button class="icon-button route-toggle" id="open-route-menu" type="button" aria-label="Abrir menu de rotas" aria-haspopup="dialog" aria-controls="route-menu" aria-expanded="false"><span aria-hidden="true"></span></button>
     <form class="destination-finder" id="destination-finder" aria-label="Buscar destino">
       <label for="destination-query">Para onde você vai?</label>
-      <div class="destination-entry"><input id="destination-query" type="search" maxlength="180" placeholder="Rua, número e cidade" autocomplete="off">
+      <div class="destination-entry"><input id="destination-query" type="search" maxlength="180" placeholder="Rua, número e cidade" autocomplete="off" enterkeyhint="search">
         <button class="primary" type="submit">Buscar</button></div>
       <p role="status"></p>
       <ul aria-label="Resultados do endereço"></ul>
       <button class="primary wide" type="button" data-go hidden>Iniciar navegação até o destino</button>
     </form>
+    <div class="point-picker" id="point-picker" hidden><p id="point-instruction" role="status"></p><button id="cancel-point" type="button" class="text-button">Cancelar</button></div>
     <details id="faction-legend" class="faction-legend" hidden><summary>Áreas de facções</summary><p id="faction-source"></p><ul></ul></details>
     <span id="offline-map-note" class="offline-map-note" hidden>Trajeto salvo · mapa de ruas indisponível offline</span>
     <div class="maneuver" id="maneuver" hidden aria-live="polite">
@@ -63,6 +65,8 @@ const outputTemplate=`
 export function makeNavigator(container, {download, prepareDestination, searchNational, routeNational, persist, reportError}) {
   container.innerHTML=outputTemplate;
   const $=id=>container.querySelector('#'+id);
+  const menu=$('route-menu');
+  const menuButton=$('open-route-menu');
   let pack, packInfo, route, origin, position, bearing=0, progress=0, legIndex=0, completed=0;
   let watchId, wakeLock, lastVoice, muted=false, offRoute=0, rerouting=false, nav=false, selection='', selectedDestination;
   let monitor=riskMonitor();
@@ -70,9 +74,27 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   const pending=new Map();
   const audio=new Audio();
   let hasStoredPack=false,connected=false,nationalMap,nationalLoading,findLocal,factions,alertFactions,factionLoad,selectedSearchPoint,lastReroute=0,planning=false;
+  function openMenu() {
+    menu.showModal();
+    menuButton.setAttribute('aria-expanded','true');
+  }
+  function endPointSelection() {
+    selection='';
+    container.classList.remove('picking-point');
+    $('point-picker').hidden=true;
+  }
+  menuButton.onclick=()=>{endPointSelection();openMenu();};
+  $('close-route-menu').onclick=()=>menu.close();
+  menu.addEventListener('close',()=>menuButton.setAttribute('aria-expanded',String(menu.open)));
+  menu.addEventListener('click',event=>{
+    if (event.target===menu && event.clientX>menu.getBoundingClientRect().right) menu.close();
+  });
   const onMapPoint=point=>{
     if (!selection) return;
-    if (!pack || !inBounds(point,pack.bounds)) return note('Escolha um ponto dentro da região baixada.');
+    if (!pack || !inBounds(point,pack.bounds)) {
+      $('point-instruction').textContent='Escolha um ponto dentro da região disponível.';
+      return;
+    }
     if (selection==='origin') {
       origin=point;
       $('origin-state').textContent='Origem marcada no mapa';
@@ -81,32 +103,29 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
       const value='Parada no mapa;'+point[1].toFixed(6)+';'+point[0].toFixed(6);
       $('stops').value=[$('stops').value.trim(),value].filter(Boolean).join('\n');
     }
-    selection='';
+    endPointSelection();
     note('');
     redraw();
+    openMenu();
   };
   const map=createMap($('map'),onMapPoint);
   const finder=createDestinationFinder($('destination-finder'),{
-    load:async()=>{
-      if (navigator.onLine) await prepareDestination();
-      if (!findLocal) throw Error('Abra o mapa da região com internet antes de pesquisar offline.');
-      return async address=>{
-        const local=findLocal(address);
-        if (!connected || local.some(result=>result.precision==='address' || result.precision==='coordinate')) return local;
-        try {
-          const national=await searchNational(address);
-          return national.length ? national : local;
-        } catch(error) {
-          if (local.length) return local;
-          throw error;
-        }
-      };
+    find:async address=>{
+      const local=findLocal?.(address) ?? [];
+      if (!connected && !findLocal) throw Error('Abra o mapa da região com internet antes de pesquisar offline.');
+      if (!connected || local.some(result=>result.precision==='address' || result.precision==='coordinate')) return local;
+      try {
+        const national=await searchNational(address);
+        return national.length ? national : local;
+      } catch(error) {
+        if (local.length) return local;
+        throw error;
+      }
     },
     select:result=>{
       selectedSearchPoint=result?.point;
-      selection='';
       redraw();
-      if (!result) return;
+      if (!result || selection) return;
       if (nationalVisible()) nationalMap.focus(result.point);
       else map.focus(result.point);
       const risk=findZone(result.point,riskAlerts());
@@ -116,6 +135,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
       if (planning || nav) throw Error('Encerre a navegação em andamento primeiro.');
       planning=true;
       try {
+        if (connected) await prepareDestination();
         const start=await acquireOrigin(false);
         const stop={name:destination.name.slice(0,120),point:destination.point};
         const planned=await computeRoute(start,[stop]);
@@ -197,6 +217,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     $('national-map').hidden=!useNational && !preparing;
     $('national-map').style.visibility=useNational?'visible':'hidden';
     $('map').hidden=useNational;
+    $('map-empty').hidden=useNational || !!pack;
     $('offline-map-note').hidden=useNational || route?.profile!=='national';
     const state={pack,route,legIndex,position,bearing,origin,destination:selectedSearchPoint ?? selectedDestination,nav,risks:riskFeatures()};
     if (useNational) {
@@ -238,7 +259,6 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     }
     if (pack!==newPack) findLocal=newPack?createDestinationIndex(newPack):undefined;
     pack=newPack;
-    $('map-empty').hidden=!!pack;
     loadFactions();
     legend();
     $('sample-action').hidden=pack?.riskMode!=='sample' || operationalLayer();
@@ -482,6 +502,8 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
 
   function startNavigation() {
     if (!route || legIndex>=route.legs.length || !navigator.geolocation) return;
+    if (menu.open) menu.close();
+    endPointSelection();
     nav=true; lastVoice=undefined; offRoute=0; monitor=riskMonitor();
     container.classList.add('navigating');
     $('maneuver').hidden=false;
@@ -530,8 +552,19 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     else if (file) $('stops').value=await file.text();
     event.target.value='';
   };
-  $('pick-origin').onclick=()=>{selection='origin';note('Toque na sua origem no mapa.');$('map').scrollIntoView({block:'nearest'});};
-  $('pick-stop').onclick=()=>{selection='stop';note('Toque na parada no mapa.');$('map').scrollIntoView({block:'nearest'});};
+  function pickPoint(kind) {
+    if(nav || !pack) return;
+    selection=kind;
+    menu.close();
+    if(nationalVisible()) nationalMap.focus(origin ?? pack.nodes[0]);
+    else map.fit(pack);
+    $('point-instruction').textContent=kind==='origin'?'Toque na sua origem no mapa.':'Toque na parada no mapa.';
+    container.classList.add('picking-point');
+    $('point-picker').hidden=false;
+  }
+  $('pick-origin').onclick=()=>pickPoint('origin');
+  $('pick-stop').onclick=()=>pickPoint('stop');
+  $('cancel-point').onclick=()=>{endPointSelection();openMenu();};
   $('sample').onclick=()=>{
     origin=[-42.996787,-22.888909];
     $('origin-state').textContent='Origem de teste carregada';
@@ -559,6 +592,8 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     setPackInfo,setNetwork,
     previewPack(value) { if(!hasStoredPack) setPack(value,false); },
     restore(snapshot) {
+      if (menu.open) menu.close();
+      endPointSelection();
       stopNavigation();
       route=snapshot?.route;origin=snapshot?.origin;position=undefined;selectedDestination=undefined;
       finder.reset();

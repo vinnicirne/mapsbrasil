@@ -33,7 +33,7 @@ Dentro da região baixada, um desvio pode ser recalculado no próprio dispositiv
 
 Use **Para onde você vai?** para digitar rua, número e cidade. Escolha o endereço e toque em **Iniciar navegação até o destino**. O Drive parte do GPS e prepara automaticamente o pacote local quando necessário. Endereços sem numeração correspondente aparecem como aproximados, para conferir o ponto antes de sair.
 
-O mapa-base online do Brasil usa OpenFreeMap. A busca explícita consulta Photon e as rotas de carro usam OSRM. A API controla a frequência das consultas. Os endereços e coordenadas necessários ao cálculo são enviados aos provedores na busca ou no roteamento online. A camada de facções cobre somente os polígonos mapeados no RJ pela fonte, com referência de agosto de 2026. As áreas neutras são exibidas sem alerta de entrada.
+O mapa-base online do Brasil usa OpenFreeMap. A busca consulta Photon após uma pausa na digitação ou ao acionar Buscar, e as rotas de carro usam OSRM. A API controla a frequência das consultas. Os endereços digitados e as coordenadas necessárias ao cálculo são enviados aos provedores na busca ou no roteamento online. A camada de facções cobre somente os polígonos mapeados no RJ pela fonte, com referência de agosto de 2026. As áreas neutras são exibidas sem alerta de entrada.
 
 O pacote de ruas e o recálculo integral sem rede atendem Rio do Ouro. Fora desse recorte, a rota nacional já salva mantém traçado, localização e instruções sem rede. O mapa-base detalhado e um novo recálculo nacional precisam de conexão. O Drive sinaliza essa condição na tela.
 
