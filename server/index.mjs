@@ -35,7 +35,7 @@ const pack=packFileBytes ? JSON.parse(packFileBytes) : null;
 const packInfo=pack ? {version:pack.version,region:pack.region,size:packFileBytes.length,sha256:hash(packFileBytes),
   bounds:pack.bounds,dataDate:pack.dataDate,riskMode:pack.riskMode} : null;
 
-const type={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8',
+const type={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8',
   '.json':'application/json; charset=utf-8','.webmanifest':'application/manifest+json','.png':'image/png','.wav':'audio/wav','.txt':'text/plain; charset=utf-8'};
 const json=(response,data,status=200)=>{
   response.writeHead(status,{'content-type':type['.json'],'cache-control':'no-store'});

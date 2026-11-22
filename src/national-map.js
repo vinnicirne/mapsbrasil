@@ -1,6 +1,9 @@
 import * as maplibregl from 'maplibre-gl';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {factionColors} from './navigation/factions.js';
+
+maplibregl.setWorkerUrl(workerUrl);
 
 const collection=features=>({type:'FeatureCollection',features});
 const feature=(type,coordinates,properties={})=>({type:'Feature',geometry:{type,coordinates},properties});
@@ -55,7 +58,7 @@ export function createNationalMap(container,onPoint,onReady) {
     focus(center,zoom=15){map.easeTo({center,zoom,pitch:0,bearing:0,duration:450});},
     overview(route) {
       const points=route?.legs.flatMap(leg=>leg.segments.flatMap(segment=>[segment.a,segment.b])) ?? [];
-      if (!points.length) return this.focus([-51,-15],3.4);
+      if (!points.length) return map.fitBounds([[-74,-34],[-28,6]],{padding:38,maxZoom:4,duration:350,pitch:0,bearing:0});
       const bounds=new maplibregl.LngLatBounds(points[0],points[0]);
       for (const point of points) bounds.extend(point);
       map.fitBounds(bounds,{padding:90,maxZoom:16,duration:550,pitch:0,bearing:0});

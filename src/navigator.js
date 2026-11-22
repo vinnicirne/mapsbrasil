@@ -192,8 +192,10 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
 
   function redraw() {
     const useNational=nationalVisible();
-    const changed=$('national-map').hidden===useNational;
-    $('national-map').hidden=!useNational;
+    const changed=$('map').hidden!==useNational;
+    const preparing=!!nationalMap && connected && !nationalMap.ready();
+    $('national-map').hidden=!useNational && !preparing;
+    $('national-map').style.visibility=useNational?'visible':'hidden';
     $('map').hidden=useNational;
     $('offline-map-note').hidden=useNational || route?.profile!=='national';
     const state={pack,route,legIndex,position,bearing,origin,destination:selectedSearchPoint ?? selectedDestination,nav,risks:riskFeatures()};
@@ -201,7 +203,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
       if(changed) {
         nationalMap.resize();
         if(!nav && selectedSearchPoint) nationalMap.focus(selectedSearchPoint);
-        else if(!nav && route) nationalMap.overview(route);
+        else if(!nav) nationalMap.overview(route);
       }
       nationalMap.set(state);
     } else {
