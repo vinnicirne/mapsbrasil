@@ -7,7 +7,9 @@ const routes = new Map([
   ['pack', 'GET'],
   ['invite', 'POST'],
   ['decision', 'POST'],
-  ['lease', 'POST']
+  ['lease', 'POST'],
+  ['search', 'POST'],
+  ['route', 'POST']
 ]);
 
 const responseHeaders = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
@@ -27,7 +29,7 @@ export async function forwardApi(request, origin, send = fetch) {
   const requestUrl = new URL(request.url);
   const endpoints = requestUrl.searchParams.getAll('endpoint');
   const endpoint = endpoints.length === 1 ? endpoints[0] : '';
-  const company = /^companies\/[\w-]+\/(members|pack|invite|decision|lease)$/.exec(endpoint);
+  const company = /^companies\/[\w-]+\/(members|pack|invite|decision|lease|search|route)$/.exec(endpoint);
   const action = company?.[1] ?? (/^(config|me|join|accept)$/.test(endpoint) ? endpoint : '');
   if (!action) return failure(404, 'Recurso não encontrado.');
   if (routes.get(action) !== request.method) return failure(405, 'Método indisponível.');

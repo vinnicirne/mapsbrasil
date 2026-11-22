@@ -119,3 +119,26 @@ textarea { resize: vertical; min-height: 90px; }
 
 #email-login { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; } #email-login input + label { margin-top: 9px; }
 .reorder { display: flex; align-items: center; gap: 6px; font-size: .8rem; margin: 6px 0; } .reorder input { width: 17px; min-height: 17px; accent-color: #276652; }
+#national-map { position: absolute; inset: 0; }
+.destination-finder { position: absolute; inset: 12px auto auto 12px; z-index: 2; width: min(420px,calc(100% - 24px)); padding: 11px; background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.destination-entry { display: flex; gap: 7px; }
+.destination-entry input { min-width: 0; }
+.destination-finder p { font-size: .8rem; color: var(--muted); margin-top: 7px; }
+.destination-finder p:empty,.destination-finder ul:empty { display: none; }
+.destination-finder ul { list-style: none; padding: 0; margin: 4px 0; max-height: 190px; overflow:auto; }
+.destination-result { display: grid; gap: 3px; width: 100%; text-align: left; padding: 8px 4px; border: 0; border-top: 1px solid var(--line); background: #fff; color: var(--ink); }
+.destination-result span { font-size: .76rem; color: var(--muted); }
+.destination-result:hover { background: #f2f7f2; }
+.destination-finder button[data-go] { margin-top: 8px; }
+.navigating .destination-finder { display:none; }
+.faction-legend { position: absolute; left: 10px; bottom: 27px; max-width: min(330px,calc(100% - 65px)); z-index: 1; padding: 5px 8px; font-size: .72rem; color: var(--ink); background: #fffffff2; border: 1px solid var(--line); border-radius: 8px; }
+.faction-legend summary { cursor:pointer; font-weight: 690; }
+.faction-legend p { margin-top: 5px; }
+.faction-legend ul { display: flex; gap: 8px; flex-wrap:wrap; padding: 0; list-style:none; }
+.faction-legend li { display:flex; align-items:center; gap:4px; }
+.faction-legend i { width:9px; height:9px; border-radius:3px; }
+.navigating .faction-legend { bottom: 108px; }
+.offline-map-note { position:absolute; bottom:53px; left: 10px; font-size:.75rem; background:white; color:var(--muted); padding:5px 8px; border-radius:7px; }
+.navigating .offline-map-note { bottom: 139px; }
+.map-wrap:has(#national-map:not([hidden])) > .attribution { display:none; }
+.map-wrap:has(#national-map:not([hidden])) .maplibregl-ctrl-bottom-left { z-index: 1; }

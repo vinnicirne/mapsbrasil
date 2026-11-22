@@ -17,7 +17,8 @@
     "@firebase/app": "^0.16.2",
     "@firebase/auth": "^1.13.6",
     "firebase-admin": "^14.5.1",
-    "jose": "^6.2.18"
+    "jose": "^6.2.18",
+    "maplibre-gl": "^6.19.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",

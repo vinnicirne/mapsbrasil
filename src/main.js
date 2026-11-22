@@ -85,7 +85,10 @@ const report=message=>{
   $('feedback').textContent=text;
   $('feedback').hidden=!text;
 };
-const navigatorUI=makeNavigator($('navigation'),{download,persist,reportError:report});
+let packLoad;
+const navigatorUI=makeNavigator($('navigation'),{download,prepareDestination,persist,reportError:report,
+  searchNational:query=>apiFor('search',{method:'POST',body:{query}}),
+  routeNational:(start,stops)=>apiFor('route',{method:'POST',body:{start,stops}})});
 
 async function api(path,{method='GET',body,raw=false}={}) {
   const token=await auth?.token();
@@ -248,12 +251,15 @@ async function refresh() {
 async function chooseCompany(id) {
   if (company!==id) {
     company=id;
+    info=undefined;
+    packLoad=undefined;
     navigatorUI.restore(snapshot?.company===id?snapshot:undefined);
   }
   $('sample-label').hidden=snapshot?.company!==id || snapshot?.pack.riskMode!=='sample';
   const nextInfo=await apiFor('pack');
   if (company!==id) return;
   info=nextInfo;
+  if (info?.riskMode==='operational') $('sample-label').hidden=true;
   navigatorUI.setPackInfo(info,true);
   if (snapshot?.company===id && info?.version===snapshot.pack.version) {
     const current=snapshot;
@@ -262,17 +268,39 @@ async function chooseCompany(id) {
       snapshot={...current,lease};
       await saveSnapshot(snapshot);
     }
+  } else if (info && snapshot?.company!==id) {
+    const onlinePack=await loadPack(id,info);
+    if (company===id && snapshot?.company!==id) navigatorUI.previewPack(onlinePack);
   }
+}
+
+function loadPack(id,metadata) {
+  if (packLoad?.id===id && packLoad?.version===metadata.version) return packLoad.promise;
+  const entry={id,version:metadata.version};
+  entry.promise=api('/companies/'+encodeURIComponent(id)+'/pack?file=1',{raw:true})
+    .then(response=>readPack(response,metadata)).catch(error=>{
+      if (packLoad===entry) packLoad=undefined;
+      throw error;
+    });
+  packLoad=entry;
+  return entry.promise;
+}
+
+async function prepareDestination() {
+  if (snapshot?.company===company && snapshot?.pack && (!serverReachable || !info || info.version===snapshot.pack.version)) return;
+  if (!info) throw Error('O mapa da região ainda não está disponível.');
+  await download();
 }
 
 async function download() {
   if (!info || navigatorUI.active()) throw Error('Encerre a navegação antes de baixar outra versão.');
   const active=company;
+  const metadata=info;
   if ('serviceWorker' in navigator) {
     await Promise.race([navigator.serviceWorker.ready,new Promise((_,reject)=>setTimeout(()=>reject(Error('A abertura offline ainda não foi preparada. Recarregue a página.')),8000))]);
   } else throw Error('Este navegador não disponibiliza a instalação offline.');
   await navigator.storage?.persist?.().catch(()=>false);
-  const pack=await readPack(await apiFor('pack?file=1',{raw:true}),info);
+  const pack=await loadPack(active,metadata);
   if (active!==company || !profile) throw Error('A empresa mudou durante o download.');
   const lease=await apiFor('lease',{method:'POST',body:{version:pack.version}});
   if (active!==company || !profile) throw Error('A empresa mudou durante o download.');

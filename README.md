@@ -29,6 +29,14 @@ A navegação acompanha o GPS, mostra a próxima manobra, estima tempo e distân
 
 Dentro da região baixada, um desvio pode ser recalculado no próprio dispositivo. Na falta de cobertura viária ou de GPS confiável, o PWA informa o estado e mantém a rota salva disponível. A navegação e os alertas dependem do PWA visível. Ao voltar de outro app, o painel verifica a posição atual. A autorização para reabrir offline dura até oito horas desde a última emissão online e fica vinculada à conta, à empresa e à versão da região.
 
+## Busca e navegação no Brasil
+
+Use **Para onde você vai?** para digitar rua, número e cidade. Escolha o endereço e toque em **Iniciar navegação até o destino**. O Drive parte do GPS e prepara automaticamente o pacote local quando necessário. Endereços sem numeração correspondente aparecem como aproximados, para conferir o ponto antes de sair.
+
+O mapa-base online do Brasil usa OpenFreeMap. A busca explícita consulta Photon e as rotas de carro usam OSRM. A API controla a frequência das consultas. Os endereços e coordenadas necessários ao cálculo são enviados aos provedores na busca ou no roteamento online. A camada de facções cobre somente os polígonos mapeados no RJ pela fonte, com referência de agosto de 2026. As áreas neutras são exibidas sem alerta de entrada.
+
+O pacote de ruas e o recálculo integral sem rede atendem Rio do Ouro. Fora desse recorte, a rota nacional já salva mantém traçado, localização e instruções sem rede. O mapa-base detalhado e um novo recálculo nacional precisam de conexão. O Drive sinaliza essa condição na tela.
+
 ## Testes
 
 ```sh
@@ -57,7 +65,7 @@ A implantação pode rodar o PWA e a API no mesmo projeto Vercel. O Auth do pain
 - `FIRESTORE_PROJECT_ID` identifica o projeto de dados do Drive. Armazene a credencial de uma conta de serviço com papel Datastore User em `FIRESTORE_SERVICE_ACCOUNT_JSON`, como segredo da Vercel. A conta deve pertencer ao projeto configurado.
 - `DRIVE_LEASE_PRIVATE_KEY` recebe uma chave EC P-256 em PEM PKCS#8, como segredo da Vercel. Use uma chave distinta em homologação e produção e mantenha-a estável entre deploys do grupo.
 - `DRIVE_DATA_NAMESPACE` define a partição de vínculos e convites. Use valores diferentes em Preview e Production.
-- `ALLOW_SAMPLE_PACK=1` disponibiliza vias reais em Rio do Ouro e um polígono de risco simulado, identificado no PWA como demonstração.
+- O pacote padrão publicado inclui o recorte de Rio do Ouro e os polígonos de facções disponíveis nessa área. Use `DRIVE_PACK_PROFILE=sample` e `ALLOW_SAMPLE_PACK=1` somente para exibir o polígono simulado no backend da Vercel.
 
 O backend local conserva o SQLite para demonstração independente. Para uma hospedagem separada, a ponte na Vercel também aceita `MAPSBRASIL_API_ORIGIN` quando `FIRESTORE_PROJECT_ID` estiver ausente.
 

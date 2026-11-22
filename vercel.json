@@ -16,7 +16,7 @@
   ],
   "functions": {
     "api/bridge.mjs": {
-      "includeFiles": "public/packs/rio-do-ouro.json"
+      "includeFiles": "{public/packs/rio-do-ouro.json,server/packs/rio-do-ouro-faccoes.json}"
     }
   }
 }

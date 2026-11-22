@@ -39,9 +39,41 @@ function inRing([x,y],ring) {
   return inside;
 }
 
-export function findZone(point, features) {
-  return features.find(feature => polygons(feature.geometry).some(([outer,...holes]) =>
-    outer && inRing(point,outer) && holes.every(hole => !inRing(point,hole))));
+const zoneIndexes=new WeakMap();
+const cellSize=.05;
+const cell=value=>Math.floor(value/cellSize);
+
+function zoneIndex(features) {
+  if (zoneIndexes.has(features)) return zoneIndexes.get(features);
+  const cells=new Map();
+  const extent=[Infinity,Infinity,-Infinity,-Infinity];
+  for(const feature of features) {
+    const sides=[Infinity,Infinity,-Infinity,-Infinity];
+    for(const [outer] of polygons(feature.geometry)) for(const [x,y] of outer??[]) {
+      sides[0]=Math.min(sides[0],x);sides[1]=Math.min(sides[1],y);
+      sides[2]=Math.max(sides[2],x);sides[3]=Math.max(sides[3],y);
+    }
+    const box=sides.map(cell);
+    extent[0]=Math.min(extent[0],box[0]);extent[1]=Math.min(extent[1],box[1]);
+    extent[2]=Math.max(extent[2],box[2]);extent[3]=Math.max(extent[3],box[3]);
+    for(let x=box[0];x<=box[2];x++) for(let y=box[1];y<=box[3];y++) {
+      const key=x+':'+y;
+      if(!cells.has(key)) cells.set(key,[]);
+      cells.get(key).push(feature);
+    }
+  }
+  const index={cells,extent};
+  zoneIndexes.set(features,index);
+  return index;
+}
+
+function includesPoint(point,feature) {
+  return polygons(feature.geometry).some(([outer,...holes])=>outer && inRing(point,outer) && holes.every(hole=>!inRing(point,hole)));
+}
+
+export function findZone(point,features) {
+  const {cells}=zoneIndex(features);
+  return cells.get(cell(point[0])+':'+cell(point[1]))?.find(feature=>includesPoint(point,feature));
 }
 
 function lineCrosses(a,b,c,d) {
@@ -52,9 +84,22 @@ function lineCrosses(a,b,c,d) {
 }
 
 export function routeCrossesZone(segments,features) {
-  return features.some(feature => segments.some(({a,b}) => findZone(a,[feature]) ||
-    polygons(feature.geometry).some(rings => rings.some(ring =>
-      ring.some((point,i)=> i>0 && lineCrosses(a,b,ring[i-1],point))))));
+  const {cells,extent}=zoneIndex(features);
+  for(const {a,b} of segments) {
+    const west=Math.max(extent[0],cell(Math.min(a[0],b[0])));
+    const east=Math.min(extent[2],cell(Math.max(a[0],b[0])));
+    const south=Math.max(extent[1],cell(Math.min(a[1],b[1])));
+    const north=Math.min(extent[3],cell(Math.max(a[1],b[1])));
+    const candidates=new Set();
+    for(let x=west;x<=east;x++) for(let y=south;y<=north;y++) {
+      for(const zone of cells.get(x+':'+y)??[]) candidates.add(zone);
+    }
+    for(const feature of candidates) {
+      if(includesPoint(a,feature) || polygons(feature.geometry).some(rings=>rings.some(ring=>
+        ring.some((position,index)=>index>0 && lineCrosses(a,b,ring[index-1],position))))) return true;
+    }
+  }
+  return false;
 }
 
 export function riskMonitor() {

@@ -42,12 +42,20 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(member).toContainText('Aprovado');
 
   await page.goto('/');
-  await page.getByRole('button',{name:'Baixar região'}).click();
-  await expect(page.getByText('Região pronta para uso offline.')).toBeVisible();
+  await page.route('**/api/companies/piloto/search',route=>route.fulfill({json:[]}));
+  await page.getByLabel('Para onde você vai?').fill('Rua Jorge Rachid, São Gonçalo');
+  await page.getByRole('button',{name:'Buscar',exact:true}).click();
+  const localResult=page.getByRole('button',{name:/Rua Jorge Rachid.*Ponto aproximado/i});
+  await localResult.click();
+  await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
+  await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
+  await page.getByRole('button',{name:'Encerrar'}).click();
+  await expect(page.getByRole('button',{name:'Atualizar região'})).toBeVisible();
+  await page.unroute('**/api/companies/piloto/search');
   await expect(page.getByText('Áreas de risco simuladas',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Carregar rota de teste'}).click();
   await expect(page.getByText('Cruza área mapeada.',{exact:false})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Iniciar navegação'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Iniciar navegação',exact:true})).toBeVisible();
   await expect.poll(()=>page.evaluate(()=>!!navigator.serviceWorker.controller)).toBe(true);
 
   await driver.setOffline(true);
@@ -62,7 +70,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   });
   expect(offlineAudio).toBeGreaterThan(.5);
   await expect(page.getByRole('img',{name:'Mapa da região e da rota'})).toBeVisible();
-  await page.getByRole('button',{name:'Iniciar navegação'}).click();
+  await page.getByRole('button',{name:'Iniciar navegação',exact:true}).click();
   await expect(page.locator('#turn-name')).toHaveText('Vire à esquerda');
   await expect(page.locator('#travel-time')).toContainText('min');
   await expect(page.getByRole('button',{name:'Encerrar'})).toBeInViewport();
@@ -123,7 +131,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(page.locator('#stops')).toHaveValue(file);
   await page.getByRole('button',{name:'Calcular rota'}).click();
   await expect(page.locator('#itinerary li')).toHaveText(['Primeira · área mapeada','Segunda']);
-  await page.getByRole('button',{name:'Iniciar navegação'}).click();
+  await page.getByRole('button',{name:'Iniciar navegação',exact:true}).click();
   await expect(page.locator('#travel-distance')).toContainText('Parada 1');
   await locate(driver,[-42.993987,-22.887809]);
   await expect(page.locator('#itinerary')).toContainText('Primeira · concluída');
@@ -132,6 +140,31 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(page.locator('#turn-name')).toHaveText('Rota concluída');
   await expect(page.locator('#itinerary')).toContainText('Segunda · concluída');
   expect(errors).toEqual([]);
+  const saoPaulo=[-46.658,-23.558];
+  const destino=[-46.652,-23.562];
+  await locate(driver,saoPaulo);
+  await page.route('**/api/companies/piloto/search',route=>route.fulfill({json:[{
+    id:'sp',name:'Avenida Paulista, 1578',locality:'São Paulo · SP',point:destino,precision:'address'
+  }]}));
+  await page.route('**/api/companies/piloto/route',route=>{
+    expect(route.request().postDataJSON().start).toEqual(saoPaulo);
+    return route.fulfill({json:{profile:'national',meters:900,seconds:160,legs:[{
+      meters:900,seconds:160,stop:{name:'Avenida Paulista, 1578',point:destino},
+      segments:[{a:saoPaulo,b:destino,meters:900,seconds:160,at:0}],
+      maneuvers:[{at:0,kind:'straight',name:''},{at:900,kind:'arrive',name:'Avenida Paulista'}]
+    }]}});
+  });
+  await page.getByLabel('Para onde você vai?').fill('Avenida Paulista, 1578, São Paulo');
+  await page.getByRole('button',{name:'Buscar',exact:true}).click();
+  await page.getByRole('button',{name:/Avenida Paulista, 1578.*São Paulo/}).click();
+  await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
+  await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
+  await driver.setOffline(true);
+  await page.goto('/');
+  await expect(page.locator('#itinerary')).toContainText('Avenida Paulista, 1578');
+  await expect(page.getByText('Trajeto salvo · mapa de ruas indisponível offline')).toBeVisible();
+  await page.getByRole('button',{name:'Iniciar navegação',exact:true}).click();
+  await expect(page.locator('#travel-distance')).toContainText('Parada 1');
   await company.close();
   await driver.close();
 });

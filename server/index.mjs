@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
+import {nationalNavigation} from './national-navigation.mjs';
 import { demoCompanies, hash, HttpError, openAccess } from './access.mjs';
 
 const host=process.env.HOST ?? '127.0.0.1';
@@ -19,6 +20,12 @@ if (!Array.isArray(companies) || companies.some(c=>!/^[\w-]+$/.test(c.id) || !c.
   throw Error('COMPANIES_JSON inválido.');
 }
 const dist=resolve('dist');
+const lastCall=new Map();
+const national=nationalNavigation({limit:async kind=>{
+  const now=Date.now();
+  if(now-(lastCall.get(kind)??0)<1250) throw new HttpError(429,'O serviço nacional está ocupado. Tente novamente em instantes.');
+  lastCall.set(kind,now);
+}});
 const dbDir=resolve(process.env.DATA_DIR ?? (demo?'data/demo':'data'));
 await mkdir(dbDir,{recursive:true});
 const access=openAccess(resolve(dbDir,'mapsbrasil.sqlite'),{demo,firebase,companies});
@@ -64,7 +71,7 @@ async function handle(request,response) {
     if (pathname==='/api/me' && method==='GET') return json(response,access.me(user));
     if (pathname==='/api/join' && method==='POST') return json(response,access.request(user,(await body(request)).code));
     if (pathname==='/api/accept' && method==='POST') return json(response,access.acceptInvite(user,(await body(request)).token));
-    const companyRoute=/^\/api\/companies\/([\w-]+)\/(members|invite|decision|pack|lease)$/.exec(pathname);
+    const companyRoute=/^\/api\/companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route)$/.exec(pathname);
     if (!companyRoute) throw new HttpError(404,'Recurso não encontrado.');
     const [,company,action]=companyRoute;
     if (action==='members' && method==='GET') return json(response,access.members(user,company));
@@ -74,6 +81,11 @@ async function handle(request,response) {
       return json(response,access.depart(user,company,uid,status));
     }
     if (action==='invite' && method==='POST') return json(response,access.invite(user,company,(await body(request)).email));
+    if (['search','route'].includes(action) && method==='POST') {
+      access.requireApproved(user,company);
+      const input=await body(request);
+      return json(response,action==='search'?await national.search(input.query):await national.route(input));
+    }
     if (action==='pack' && method==='GET') {
       access.requireApproved(user,company);
       if (url.searchParams.has('file')) {

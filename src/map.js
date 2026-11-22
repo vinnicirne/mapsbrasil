@@ -1,4 +1,15 @@
+import {factionColors} from './navigation/factions.js';
+
 const radians=Math.PI/180;
+const limits=new WeakMap();
+function bounds(points) {
+  const box=[Infinity,Infinity,-Infinity,-Infinity];
+  for (const [x,y] of points) {
+    box[0]=Math.min(box[0],x);box[1]=Math.min(box[1],y);
+    box[2]=Math.max(box[2],x);box[3]=Math.max(box[3],y);
+  }
+  return box;
+}
 const palette = {motorway:'#a88746',trunk:'#bb995a',primary:'#c4aa70',secondary:'#b1ad95',tertiary:'#b9bdb0'};
 
 export function createMap(canvas, onPoint) {
@@ -40,7 +51,7 @@ export function createMap(canvas, onPoint) {
     }
     context.setTransform(ratio,0,0,ratio,0,0);
     context.fillStyle='#edf1e9';context.fillRect(0,0,width,height);
-    const {pack,route,legIndex,position,origin,destination,nav,bearing}=state;
+    const {pack,route,legIndex,position,origin,destination,nav,bearing,risks}=state;
     if (!pack) return;
     context.lineJoin='round';context.lineCap='round';
     for (const {kind,points} of pack.areas) {
@@ -57,13 +68,21 @@ export function createMap(canvas, onPoint) {
       context.strokeStyle=major?'#faf3e0':'#d4dcd3';context.lineWidth=major?7:4;context.stroke();
       context.strokeStyle=major?palette[road.kind]:'#fff';context.lineWidth=major?3.6:2;context.stroke();
     }
-    for (const feature of pack.risks.features) {
+    const viewport=bounds([geo(0,0),geo(width,0),geo(width,height),geo(0,height)]);
+    for (const feature of risks ?? pack.risks.features) {
       const {type,coordinates}=feature.geometry;
       const polys=type==='Polygon'?[coordinates]:type==='MultiPolygon'?coordinates:[];
+      let box=limits.get(feature);
+      if(!box) {
+        box=bounds(polys.flatMap(polygon=>polygon[0]??[]));
+        limits.set(feature,box);
+      }
+      if(box[2]<viewport[0] || box[0]>viewport[2] || box[3]<viewport[1] || box[1]>viewport[3]) continue;
       context.beginPath();
       for (const polygon of polys) for (const ring of polygon) { trace(ring);context.closePath(); }
-      context.fillStyle='#d4423f38';context.fill('evenodd');
-      context.strokeStyle='#ba3734';context.lineWidth=1.5;context.stroke();
+      const [outline,fill]=factionColors(feature);
+      context.fillStyle=fill;context.fill('evenodd');
+      context.strokeStyle=outline;context.lineWidth=1.5;context.stroke();
     }
     if (zoom>=0.75) {
       const grid=new Set();
@@ -126,8 +145,17 @@ export function createMap(canvas, onPoint) {
       zoom=Math.max(0.24,Math.min(rect.width/(scale()/zoom*(c-a)*lonRatio),rect.height/(scale()/zoom*(d-b)))*0.9);
       focus([(a+c)/2,(b+d)/2]);
     },
+    fitRoute(route) {
+      const points=route.legs.flatMap(leg=>leg.segments.flatMap(segment=>[segment.a,segment.b]));
+      if(!points.length) return;
+      const [a,b,c,d]=bounds(points);
+      const rect=canvas.getBoundingClientRect();
+      zoom=Math.min(3,Math.max(.001,Math.min(rect.width/(36000*Math.max(c-a,.0004)*lonRatio),
+        rect.height/(36000*Math.max(d-b,.0004)))*.68));
+      focus([(a+c)/2,(b+d)/2]);
+    },
     focus,
-    zoom(delta) {zoom=Math.min(9,Math.max(0.18,zoom*delta));schedule();},
+    zoom(delta) {zoom=Math.min(9,Math.max(0.001,zoom*delta));schedule();},
     follow(position) {zoom=2.5;focus(position,0);}
   };
 }

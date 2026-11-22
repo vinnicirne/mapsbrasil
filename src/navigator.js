@@ -2,6 +2,9 @@ import {createMap} from './map.js';
 import {orderByProximity,readStops} from './navigation/stops.js';
 import {distance,findZone,heading,inBounds,riskMonitor,routeCrossesZone} from './navigation/geometry.js';
 import {projectProgress} from './navigation/router.js';
+import {createDestinationIndex} from './navigation/destinations.js';
+import {createDestinationFinder} from './destination-finder.js';
+import {areaName,factionColors} from './navigation/factions.js';
 
 const arrows={left:'↰',right:'↱',straight:'↑',uturn:'↶',arrive:'●'};
 const directions={left:'Vire à esquerda',right:'Vire à direita',straight:'Siga em frente',uturn:'Faça o retorno',arrive:'Chegada à parada'};
@@ -9,7 +12,7 @@ const audioFiles={start:'/audio/start.wav',left:'/audio/left.wav',right:'/audio/
 const formatDistance = value => value>=1000 ? (value/1000).toFixed(1).replace('.',',')+' km' : Math.max(0,Math.round(value/10)*10)+' m';
 const outputTemplate=`
   <aside class="route-panel" aria-label="Preparar rota">
-    <div class="route-title"><span class="label">NAVEGAÇÃO</span><h1>Sua próxima rota</h1><p>Confira as paradas e baixe a região antes de sair.</p></div>
+    <div class="route-title"><span class="label">NAVEGAÇÃO</span><h1>Sua próxima rota</h1><p>Busque um destino no Brasil ou prepare uma lista de entregas.</p></div>
     <section class="pack-card">
       <div class="pack-top"><span class="download-icon" aria-hidden="true">⇩</span><div><h2>Mapa offline</h2><p id="pack-info">Selecione sua empresa para continuar.</p></div></div>
       <button class="secondary wide" id="download" type="button">Baixar região</button>
@@ -31,8 +34,19 @@ const outputTemplate=`
     <p class="fine">Mantenha o PWA visível para receber alertas. O GPS é usado durante a navegação.</p>
   </aside>
   <section class="map-wrap" aria-label="Mapa de navegação">
+    <div id="national-map" role="region" aria-label="Mapa de navegação do Brasil" hidden></div>
     <canvas id="map" aria-label="Mapa da região e da rota" role="img"></canvas>
-    <div class="map-empty" id="map-empty"><strong>Seu trajeto aparece aqui</strong><span>Baixe uma região para abrir o mapa.</span></div>
+    <div class="map-empty" id="map-empty"><strong>Seu trajeto aparece aqui</strong><span>Carregando a região disponível.</span></div>
+    <form class="destination-finder" id="destination-finder" aria-label="Buscar destino">
+      <label for="destination-query">Para onde você vai?</label>
+      <div class="destination-entry"><input id="destination-query" type="search" maxlength="180" placeholder="Rua, número e cidade" autocomplete="off">
+        <button class="primary" type="submit">Buscar</button></div>
+      <p role="status"></p>
+      <ul aria-label="Resultados do endereço"></ul>
+      <button class="primary wide" type="button" data-go hidden>Iniciar navegação até o destino</button>
+    </form>
+    <details id="faction-legend" class="faction-legend" hidden><summary>Áreas de facções</summary><p id="faction-source"></p><ul></ul></details>
+    <span id="offline-map-note" class="offline-map-note" hidden>Trajeto salvo · mapa de ruas indisponível offline</span>
     <div class="maneuver" id="maneuver" hidden aria-live="polite">
       <span class="turn-arrow" id="turn-arrow" aria-hidden="true">↑</span>
       <div><span id="turn-distance"></span><h2 id="turn-name">Obtendo GPS</h2><p id="turn-road"></p></div>
@@ -46,7 +60,7 @@ const outputTemplate=`
     <a class="attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
   </section>`;
 
-export function makeNavigator(container, {download, persist, reportError}) {
+export function makeNavigator(container, {download, prepareDestination, searchNational, routeNational, persist, reportError}) {
   container.innerHTML=outputTemplate;
   const $=id=>container.querySelector('#'+id);
   let pack, packInfo, route, origin, position, bearing=0, progress=0, legIndex=0, completed=0;
@@ -55,7 +69,8 @@ export function makeNavigator(container, {download, persist, reportError}) {
   let worker, requestId=0;
   const pending=new Map();
   const audio=new Audio();
-  const map=createMap($('map'),point=>{
+  let hasStoredPack=false,connected=false,nationalMap,nationalLoading,findLocal,factions,alertFactions,factionLoad,selectedSearchPoint,lastReroute=0,planning=false;
+  const onMapPoint=point=>{
     if (!selection) return;
     if (!pack || !inBounds(point,pack.bounds)) return note('Escolha um ponto dentro da região baixada.');
     if (selection==='origin') {
@@ -69,33 +84,167 @@ export function makeNavigator(container, {download, persist, reportError}) {
     selection='';
     note('');
     redraw();
+  };
+  const map=createMap($('map'),onMapPoint);
+  const finder=createDestinationFinder($('destination-finder'),{
+    load:async()=>{
+      if (navigator.onLine) await prepareDestination();
+      if (!findLocal) throw Error('Abra o mapa da região com internet antes de pesquisar offline.');
+      return async address=>{
+        const local=findLocal(address);
+        if (!connected || local.some(result=>result.precision==='address' || result.precision==='coordinate')) return local;
+        try {
+          const national=await searchNational(address);
+          return national.length ? national : local;
+        } catch(error) {
+          if (local.length) return local;
+          throw error;
+        }
+      };
+    },
+    select:result=>{
+      selectedSearchPoint=result?.point;
+      selection='';
+      redraw();
+      if (!result) return;
+      if (nationalVisible()) nationalMap.focus(result.point);
+      else map.focus(result.point);
+      const risk=findZone(result.point,riskAlerts());
+      return risk && 'Destino em área mapeada: '+areaName(risk)+'.';
+    },
+    navigate:async destination=>{
+      if (planning || nav) throw Error('Encerre a navegação em andamento primeiro.');
+      planning=true;
+      try {
+        const start=await acquireOrigin(false);
+        const stop={name:destination.name.slice(0,120),point:destination.point};
+        const planned=await computeRoute(start,[stop]);
+        origin=undefined;
+        $('origin-state').textContent='Origem pelo GPS';
+        $('stops').value=stop.name.replaceAll(';',',')+';'+stop.point[1]+';'+stop.point[0];
+        await applyRoute(planned);
+        startNavigation();
+        finder.reset();
+      } finally {planning=false;}
+    }
   });
 
   function note(text) { $('nav-notice').textContent=text; }
-  function redraw() {map.set({pack,route,legIndex,position,bearing,origin,destination:selectedDestination,nav});}
+  function nationalVisible() {
+    return !!nationalMap?.ready() && connected && (operationalLayer() || route?.profile==='national' ||
+      (selectedSearchPoint && !inBounds(selectedSearchPoint,pack?.bounds ?? [0,0,0,0])));
+  }
+
+  function operationalLayer() {
+    return pack?.riskMode==='operational' || (connected && packInfo?.riskMode==='operational');
+  }
+
+  function riskFeatures() {
+    if (!operationalLayer()) return pack?.risks.features ?? [];
+    return factions ?? (pack?.riskMode==='operational' ? pack.risks.features : []);
+  }
+
+  function riskAlerts() {
+    return operationalLayer() ? alertFactions ?? riskFeatures() : riskFeatures();
+  }
+
+  function loadFactions() {
+    if (!operationalLayer() || factions || factionLoad) return;
+    factionLoad=import('./map-data/faccoes-rj.json').then(({default:source})=>{
+      factions=source.features.map((feature,index)=>({...feature,id:feature.id??'rj-'+index,
+        properties:{label:feature.properties.n,faction:feature.properties.f}}));
+      alertFactions=factions.filter(feature=>feature.properties.faction!=='NEU');
+      legend();
+      redraw();
+    }).catch(()=>{factionLoad=undefined;});
+  }
+
+  function legend() {
+    const panel=$('faction-legend');
+    panel.hidden=!operationalLayer() || !riskFeatures().length;
+    if(panel.hidden) return;
+    $('faction-source').textContent='Rio de Janeiro · Dados de Riscos / GENI-UFF · ago/2026';
+    const unique=new Map();
+    for (const feature of riskFeatures()) {
+      const code=feature.properties?.faction;
+      if(code && !unique.has(code)) unique.set(code,factionColors(feature)[0]);
+    }
+    panel.querySelector('ul').replaceChildren(...[...unique].map(([code,color])=>{
+      const item=document.createElement('li');
+      const marker=document.createElement('i');
+      marker.style.backgroundColor=color;
+      item.append(marker,code);
+      return item;
+    }));
+  }
+
+  function enableNationalMap() {
+    if (!connected || nationalMap || nationalLoading) return;
+    nationalLoading=import('./national-map.js').then(({createNationalMap})=>{
+      const element=$('national-map');
+      element.hidden=false;
+      try { nationalMap=createNationalMap(element,onMapPoint,redraw); }
+      catch { element.hidden=true; }
+      redraw();
+      nationalMap?.resize();
+    }).catch(()=>{});
+  }
+
+  function redraw() {
+    const useNational=nationalVisible();
+    const changed=$('national-map').hidden===useNational;
+    $('national-map').hidden=!useNational;
+    $('map').hidden=useNational;
+    $('offline-map-note').hidden=useNational || route?.profile!=='national';
+    const state={pack,route,legIndex,position,bearing,origin,destination:selectedSearchPoint ?? selectedDestination,nav,risks:riskFeatures()};
+    if (useNational) {
+      if(changed) {
+        nationalMap.resize();
+        if(!nav && selectedSearchPoint) nationalMap.focus(selectedSearchPoint);
+        else if(!nav && route) nationalMap.overview(route);
+      }
+      nationalMap.set(state);
+    } else {
+      map.set(state);
+      if(changed && !nav && route?.profile==='national') map.fitRoute(route);
+    }
+  }
   const save=()=>persist({route,origin,legIndex,completed,stopsText:$('stops').value});
-  function setNetwork(online) { $('download').disabled=!online || !packInfo; $('download').textContent=pack?'Atualizar região':'Baixar região'; }
+  function setNetwork(online) {
+    connected=online;
+    $('download').disabled=!online || !packInfo;
+    $('download').textContent=hasStoredPack?'Atualizar região':'Baixar região';
+    if (operationalLayer()) {enableNationalMap();loadFactions();}
+    $('sample-action').hidden=pack?.riskMode!=='sample' || operationalLayer();
+    legend();
+    redraw();
+  }
   function setPackInfo(info,online) {
     packInfo=info;
-    $('pack-info').textContent=pack ? pack.region+' · baixado'
+    $('pack-info').textContent=hasStoredPack && pack ? pack.region+(info && info.version!==pack.version?' · atualização disponível':' · baixado')
       : info ? info.region+' · '+Math.ceil(info.size/1024)+' KB' : 'Nenhuma região publicada.';
     setNetwork(online);
   }
 
-  function setPack(newPack, fit=true) {
+  function setPack(newPack, stored=true) {
+    hasStoredPack=!!newPack && stored;
     if (newPack!==pack) {
       worker?.terminate();
       for (const result of pending.values()) result.reject(Error('O pacote mudou.'));
       pending.clear();
       worker=undefined;
     }
+    if (pack!==newPack) findLocal=newPack?createDestinationIndex(newPack):undefined;
     pack=newPack;
     $('map-empty').hidden=!!pack;
-    $('sample-action').hidden=pack?.riskMode!=='sample';
+    loadFactions();
+    legend();
+    $('sample-action').hidden=pack?.riskMode!=='sample' || operationalLayer();
     $('calculate').disabled=!pack;
     $('pick-origin').disabled=!pack;
     $('pick-stop').disabled=!pack;
-    if (pack && fit) map.fit(pack);
+    if (pack) map.fit(pack);
+    if (route?.profile==='national') map.fitRoute(route);
     redraw();
   }
 
@@ -133,34 +282,51 @@ export function makeNavigator(container, {download, persist, reportError}) {
     $('calculate').disabled=!pack || nav;
   }
 
-  function acquireOrigin() {
-    if (origin) return Promise.resolve(origin);
+  function acquireOrigin(useSaved=true) {
+    if (useSaved && origin) return Promise.resolve(origin);
+    if (!navigator.geolocation) return Promise.reject(Error('GPS indisponível neste navegador.'));
     return new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(
       ({coords})=>{
         if (coords.accuracy>100) return reject(Error('GPS impreciso. Marque a origem no mapa.'));
         position=[coords.longitude,coords.latitude];resolve(position);
       },
       ()=>reject(Error('GPS indisponível. Marque a origem no mapa.')),
-      {enableHighAccuracy:true,timeout:10000,maximumAge:5000}
+      {enableHighAccuracy:true,timeout:10000,maximumAge:useSaved?5000:0}
     ));
   }
 
+  async function computeRoute(start,stops) {
+    if (pack && [start,...stops.map(stop=>stop.point)].every(point=>inBounds(point,pack.bounds))) return compute(start,stops);
+    if (!connected) throw Error('O recálculo fora da região baixada precisa de internet. O trajeto salvo continua disponível.');
+    enableNationalMap();
+    return routeNational(start,stops);
+  }
+
+  async function applyRoute(planned) {
+    route=planned;
+    legIndex=0;completed=0;progress=0;lastReroute=0;
+    await save();
+    const crosses=routeCrossesZone(route.legs.flatMap(leg=>leg.segments),riskAlerts());
+    note(formatDistance(route.meters)+' · '+Math.max(1,Math.ceil(route.seconds/60))+' min estimados'+(crosses?' · Cruza área mapeada.':'.'));
+    itinerary();
+    redraw();
+    if (route.profile==='national') {
+      if(nationalVisible()) nationalMap.overview(route);
+      else map.fitRoute(route);
+    }
+  }
+
   async function calculate() {
-    if (!pack || nav) return;
+    if (!pack || nav || planning) return;
+    planning=true;
     $('calculate').disabled=true;
     note('Calculando rota…');
     try {
       const stops=readStops($('stops').value,pack);
       const start=await acquireOrigin();
-      route=await compute(start,$('reorder').checked ? orderByProximity(start,stops) : stops);
-      legIndex=0;completed=0;progress=0;
-      await save();
-      const crosses=routeCrossesZone(route.legs.flatMap(leg=>leg.segments),pack.risks.features);
-      note(formatDistance(route.meters)+' · '+Math.max(1,Math.ceil(route.seconds/60))+' min estimados'+(crosses?' · Cruza área mapeada.':'.'));
-      itinerary();
-      redraw();
+      await applyRoute(await computeRoute(start,$('reorder').checked ? orderByProximity(start,stops) : stops));
     } catch (error) {note(error.message);}
-    finally { $('calculate').disabled=!pack || nav;}
+    finally { planning=false; $('calculate').disabled=!pack || nav;}
   }
 
   function voice(kind,text) {
@@ -213,22 +379,23 @@ export function makeNavigator(container, {download, persist, reportError}) {
   function updateRisk(raw,accuracy) {
     const badge=$('risk');
     const covered=inBounds(raw,pack.bounds);
-    const {entered,current}=monitor(raw,accuracy,covered?pack.risks.features:[]);
-    badge.hidden=covered && !current;
-    badge.textContent=!covered?'Fora da cobertura offline':current ?
-      (pack.riskMode==='sample'?'Área de risco simulada':'Área de risco mapeada') : '';
-    if (entered && covered) {
+    const {entered,current}=monitor(raw,accuracy,riskAlerts());
+    badge.hidden=!current && (covered || route?.profile==='national');
+    badge.textContent=current ? (!operationalLayer()?'Área de risco simulada':'Área de risco mapeada · '+areaName(current))
+      : 'Fora da cobertura offline';
+    if (entered) {
       badge.dataset.new='1';
       voice('risk',badge.textContent);
     } else delete badge.dataset.new;
   }
 
   async function reroute(raw) {
-    if (rerouting) return;
+    if (rerouting || Date.now()-lastReroute<8000) return;
+    lastReroute=Date.now();
     rerouting=true;
     const originalRoute=route;
     try {
-      const next=await compute(raw,route.legs.slice(legIndex).map(leg=>leg.stop));
+      const next=await computeRoute(raw,route.legs.slice(legIndex).map(leg=>leg.stop));
       if (!nav || originalRoute!==route) return;
       route={...route,legs:[...route.legs.slice(0,legIndex),...next.legs]};
       progress=0;offRoute=0;lastVoice=undefined;
@@ -343,7 +510,8 @@ export function makeNavigator(container, {download, persist, reportError}) {
     $('maneuver').hidden=true; $('travel').hidden=true; $('risk').hidden=true;
     $('start-nav').disabled=false;
     $('calculate').disabled=!pack;
-    if (pack) map.fit(pack);
+    if (route?.profile==='national') map.fitRoute(route);
+    else if (pack) map.fit(pack);
     redraw();
   }
 
@@ -377,15 +545,21 @@ export function makeNavigator(container, {download, persist, reportError}) {
     $('mute').setAttribute('aria-pressed',String(muted));
     if (muted) {window.speechSynthesis?.cancel();audio.pause();}
   };
-  $('zoom-in').onclick=()=>map.zoom(1.25);
-  $('zoom-out').onclick=()=>map.zoom(0.8);
-  $('fit').onclick=()=>{if (pack) map.fit(pack);};
+  $('zoom-in').onclick=()=>(nationalVisible()?nationalMap:map).zoom(1.25);
+  $('zoom-out').onclick=()=>(nationalVisible()?nationalMap:map).zoom(0.8);
+  $('fit').onclick=()=>{
+    if(nationalVisible()) nationalMap.overview(route);
+    else if(route?.profile==='national') map.fitRoute(route);
+    else if(pack) map.fit(pack);
+  };
   return {
     active:()=>nav,
     setPackInfo,setNetwork,
+    previewPack(value) { if(!hasStoredPack) setPack(value,false); },
     restore(snapshot) {
       stopNavigation();
       route=snapshot?.route;origin=snapshot?.origin;position=undefined;selectedDestination=undefined;
+      finder.reset();
       legIndex=snapshot?.legIndex ?? 0;completed=snapshot?.completed ?? 0;progress=0;
       $('stops').value=snapshot?.stopsText ?? '';
       $('origin-state').textContent=origin?'Origem salva':'Origem pelo GPS';

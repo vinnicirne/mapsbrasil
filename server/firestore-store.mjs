@@ -9,6 +9,15 @@ export function firestoreStore(database, namespace) {
   const invites=base.collection('invites');
   const member=(company,uid)=>grants.doc(hash(JSON.stringify([company,uid])));
   return {
+    async reserveProvider(kind) {
+      const ref=database.collection('drive_provider_limits').doc(kind);
+      await database.runTransaction(async tx=>{
+        const last=(await tx.get(ref)).data()?.at ?? 0;
+        const now=Date.now();
+        if(now-last<1250) throw new HttpError(429,'O serviço nacional está ocupado. Tente novamente em instantes.');
+        tx.set(ref,{at:now});
+      });
+    },
     async get(company,uid) { return (await member(company,uid).get()).data(); },
     async list(field,value) { return (await grants.where(field,'==',value).get()).docs.map(doc=>doc.data()); },
     async request(request) {

@@ -2,6 +2,7 @@ import {readFile} from 'node:fs/promises';
 import {firebaseWebConfig,hash,HttpError,membershipService} from './membership-core.mjs';
 import {configuredFirestore} from './firestore-store.mjs';
 import {authVerifier} from './firebase-token.mjs';
+import {nationalNavigation} from './national-navigation.mjs';
 
 const responseHeaders={'cache-control':'no-store','x-content-type-options':'nosniff'};
 const json=(value,status=200)=>Response.json(value,{status,headers:responseHeaders});
@@ -25,7 +26,7 @@ async function readBody(request) {
   throw new HttpError(400,'Dados inválidos.');
 }
 
-export function createDriveHandler({access, firebase, packBytes}) {
+export function createDriveHandler({access, firebase, packBytes, national}) {
   const pack=packBytes && JSON.parse(packBytes);
   const packInfo=pack && {version:pack.version,region:pack.region,size:packBytes.length,sha256:hash(packBytes),
     bounds:pack.bounds,dataDate:pack.dataDate,riskMode:pack.riskMode};
@@ -35,7 +36,7 @@ export function createDriveHandler({access, firebase, packBytes}) {
       const named=url.searchParams.getAll('endpoint');
       const endpoint=named.length===1 ? named[0] : named.length===0 ? url.pathname.slice('/api/'.length) : '';
       const method=request.method;
-      const companyRoute=/^companies\/([\w-]+)\/(members|invite|decision|pack|lease)$/.exec(endpoint);
+      const companyRoute=/^companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route)$/.exec(endpoint);
       if (endpoint==='config' && method==='GET') return json({firebase,demo:false,signup:null});
       if (!companyRoute && !['me','join','accept'].includes(endpoint)) throw new HttpError(404,'Recurso não encontrado.');
       const user=await access.authenticate(request.headers.get('authorization'));
@@ -51,6 +52,11 @@ export function createDriveHandler({access, firebase, packBytes}) {
           return json(await access.depart(user,company,uid,status));
         }
         if (action==='invite' && method==='POST') return json(await access.invite(user,company,(await readBody(request)).email));
+        if (national && ['search','route'].includes(action) && method==='POST') {
+          await access.requireApproved(user,company);
+          const input=await readBody(request);
+          return json(action==='search'?await national.search(input.query):await national.route(input));
+        }
         if (action==='pack' && method==='GET') {
           await access.requireApproved(user,company);
           if (url.searchParams.get('file')==='1') {
@@ -80,7 +86,10 @@ export async function configureDriveHandler(env) {
       typeof c.joinCode!=='string' || !c.joinCode || !Array.isArray(c.adminUids) || c.adminUids.some(uid=>typeof uid!=='string'))) {
     throw Error('COMPANIES_JSON inválido.');
   }
-  const access=membershipService({store:configuredFirestore(env),companies,authenticate:authVerifier(firebase),privateKey:env.DRIVE_LEASE_PRIVATE_KEY});
-  const packBytes=env.ALLOW_SAMPLE_PACK==='1' ? await readFile(new URL('../public/packs/rio-do-ouro.json',import.meta.url)) : null;
-  return createDriveHandler({access,firebase,packBytes});
+  const store=configuredFirestore(env);
+  const access=membershipService({store,companies,authenticate:authVerifier(firebase),privateKey:env.DRIVE_LEASE_PRIVATE_KEY});
+  const packBytes=env.DRIVE_PACK_PROFILE==='sample'
+    ? (env.ALLOW_SAMPLE_PACK==='1' ? await readFile(new URL('../public/packs/rio-do-ouro.json',import.meta.url)) : null)
+    : await readFile(new URL('./packs/rio-do-ouro-faccoes.json',import.meta.url));
+  return createDriveHandler({access,firebase,packBytes,national:nationalNavigation({env,limit:kind=>store.reserveProvider(kind)})});
 }
