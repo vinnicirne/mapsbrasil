@@ -1,0 +1,6 @@
+Base viária e cartográfica © OpenStreetMap contributors.
+Open Database License (ODbL) 1.0: https://opendatacommons.org/licenses/odbl/1-0/
+Atribuição: https://www.openstreetmap.org/copyright
+O arquivo packs/rio-do-ouro.json contém o extrato e a base viária derivada distribuída pelo piloto.
+O script scripts/make-pack.mjs reproduz a transformação.
+A camada de risco de demonstração é sintética e independente da base OpenStreetMap.
