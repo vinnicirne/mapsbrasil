@@ -1,4 +1,4 @@
-# Checklist de construção do MapsBrasil
+# Checklist de construção do MapsBrasil Drive
 
 - [x] Clonar o repositório independente e delimitar o piloto geográfico.
 - [x] Preparar um pacote offline com vias, mapa, endereços e polígono de risco simulado.

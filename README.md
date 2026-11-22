@@ -1,4 +1,4 @@
-# MapsBrasil Motorista
+# MapsBrasil Drive
 
 PWA independente para motoristas terceirizados. A empresa aprova um vínculo pelo identificador da conta, mesmo quando o motorista usa e-mail pessoal. O sistema tem frontend, API, banco SQLite, service worker e publicação próprios. Pode autenticar no mesmo projeto Firebase do sistema corporativo. O PWA consulta apenas a sua API e o provedor de identidade.
 
@@ -18,7 +18,7 @@ $env:MAPSBRASIL_DEMO = '1'
 npm start
 ```
 
-Abra [MapsBrasil local](http://127.0.0.1:4173). A demonstração só inicia em loopback e fora de produção. Os usuários, pedidos e aprovações são fictícios. A base viária de Rio do Ouro é um extrato do OpenStreetMap e o único polígono de risco dessa demonstração é simulado.
+Abra [MapsBrasil Drive local](http://127.0.0.1:4173). A demonstração só inicia em loopback e fora de produção. Os usuários, pedidos e aprovações são fictícios. A base viária de Rio do Ouro é um extrato do OpenStreetMap e o único polígono de risco dessa demonstração é simulado.
 
 1. Abra o PWA e entre como motorista. Solicite acesso com o código `rio-demo`.
 2. Em outro perfil de navegador, abra [/gestao](http://127.0.0.1:4173/gestao) e entre como empresa. Aprove o vínculo.

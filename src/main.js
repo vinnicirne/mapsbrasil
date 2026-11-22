@@ -6,7 +6,7 @@ import {allowsOffline,clearSnapshot,loadSnapshot,offlineExpiry,readPack,saveSnap
 const root=document.querySelector('#app');
 root.innerHTML=`
   <header class="app-header">
-    <a class="brand" href="/" aria-label="MapsBrasil, início"><img src="/icons/icon-192.png" alt="" width="42" height="42"><span>MapsBrasil <small>MOTORISTA</small></span></a>
+    <a class="brand" href="/" aria-label="MapsBrasil Drive, início"><img src="/icons/icon-192.png" alt="" width="42" height="42"><span>MapsBrasil Drive</span></a>
     <div class="header-actions">
       <span id="network" class="network" aria-live="polite"><i></i><span>Online</span></span>
       <a href="/gestao" id="manage-link" hidden>Gestão de motoristas</a>
@@ -54,7 +54,7 @@ root.innerHTML=`
     <div id="navigation" class="navigation"></div>
   </main>
   <main id="management" class="manager" hidden>
-    <section class="manager-head"><h1>Gestão de motoristas</h1><p>Analise solicitações e convide motoristas para usar o MapsBrasil.</p></section>
+    <section class="manager-head"><h1>Gestão de motoristas</h1><p>Analise solicitações e convide motoristas para usar o MapsBrasil Drive.</p></section>
     <section class="manager-tools">
       <div><label for="managed-company">Empresa</label><select id="managed-company"></select></div>
       <div><p>Código para autocadastro</p><output id="join-code"></output></div>

@@ -1,6 +1,6 @@
 {
   "id": "/", "start_url": "/", "scope": "/",
-  "name": "MapsBrasil Motorista", "short_name": "MapsBrasil",
+  "name": "MapsBrasil Drive", "short_name": "MapsBrasil Drive",
   "description": "Navegação e alertas offline para motoristas",
   "display": "standalone", "background_color": "#eef2ed", "theme_color": "#15352f",
   "icons": [

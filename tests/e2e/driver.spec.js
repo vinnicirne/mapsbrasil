@@ -23,6 +23,10 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   const errors=[];
   page.on('pageerror',error=>errors.push(error.message));
   await page.goto('/');
+  await expect(page).toHaveTitle(/MapsBrasil Drive/);
+  await expect(page.getByRole('link',{name:'MapsBrasil Drive, início'})).toHaveText('MapsBrasil Drive');
+  const manifest=await page.request.get('/manifest.webmanifest');
+  expect((await manifest.json()).name).toBe('MapsBrasil Drive');
   await page.getByRole('button',{name:'Entrar como motorista'}).click();
   await page.getByLabel('Código da empresa').fill('rio-demo');
   await page.getByRole('button',{name:'Solicitar acesso'}).click();
