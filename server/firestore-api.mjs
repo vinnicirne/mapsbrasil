@@ -55,7 +55,7 @@ export function createDriveHandler({access, firebase, packBytes, national}) {
         if (national && ['search','route'].includes(action) && method==='POST') {
           await access.requireApproved(user,company);
           const input=await readBody(request);
-          return json(action==='search'?await national.search(input.query):await national.route(input));
+          return json(action==='search'?await national.search(input.query,input.near):await national.route(input));
         }
         if (action==='pack' && method==='GET') {
           await access.requireApproved(user,company);
@@ -73,7 +73,7 @@ export function createDriveHandler({access, firebase, packBytes, national}) {
       throw new HttpError(405,'Método indisponível.');
     } catch (error) {
       if (!(error instanceof HttpError)) console.error('Erro na API do Drive:',error.code ?? error.name);
-      return json({error:error instanceof HttpError ? error.message : 'Falha temporária no serviço.'},error.status ?? 500);
+      return json({error:error instanceof HttpError ? error.message : 'Falha temporária no serviço.',retryAfterMs:error.retryAfterMs},error.status ?? 500);
     }
   };
 }

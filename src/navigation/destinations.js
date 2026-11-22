@@ -1,7 +1,7 @@
 import {distance,inBounds} from './geometry.js';
 
 const abbreviations = new Map([['r','rua'],['av','avenida'],['estr','estrada'],['tv','travessa']]);
-const fold = value => String(value).normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase()
+export const foldAddress = value => String(value).normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase()
   .replace(/[^a-z0-9]+/g,' ').trim().split(' ').map(word=>abbreviations.get(word) ?? word).join(' ');
 const ignored = new Set(['de','da','do','das','dos']);
 
@@ -11,19 +11,19 @@ function parse(text) {
   const coordinates=/^(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)$/.exec(raw);
   if (coordinates) return {point:[Number(coordinates[2]),Number(coordinates[1])]};
   const parts=raw.split(',').map(piece=>piece.trim()).filter(Boolean);
-  const named=fold(parts.shift() ?? '');
+  const named=foldAddress(parts.shift() ?? '');
   const house=parts[0]?.match(/^\d+[a-z]?$/i)?.[0] ?? /\b(\d+[a-z]?)$/.exec(named)?.[1];
   if (house && parts[0]===house) parts.shift();
   const street=house ? named.replace(/\s+(?:n |num |numero )?\d+[a-z]?$/,'') : named;
-  return {street,house:house?.toLowerCase(),locality:fold(parts.join(' '))};
+  return {street,house:house?.toLowerCase(),locality:foldAddress(parts.join(' '))};
 }
 
 export function createDestinationIndex(pack) {
-  const region=fold(pack.region);
+  const region=foldAddress(pack.region);
   const streets=new Map();
   for (const road of pack.roads) {
     if (!road.name) continue;
-    const normalized=fold(road.name);
+    const normalized=foldAddress(road.name);
     for(let i=1;i<road.path.length;i++) {
       const a=pack.nodes[road.path[i-1]], b=pack.nodes[road.path[i]];
       const meters=distance(a,b);
@@ -34,11 +34,11 @@ export function createDestinationIndex(pack) {
     }
   }
   const numbered=pack.addresses.map((item,index)=>({
-    id:'address:'+index,normalized:fold(item.street),number:String(item.number).toLowerCase(),
+    id:'address:'+index,normalized:foldAddress(item.street),number:String(item.number).toLowerCase(),
     name:item.street+', '+item.number,precision:'address',point:item.point
   }));
 
-  return (text)=>{
+  return (text,near)=>{
     const query=parse(text);
     if (query.point) return inBounds(query.point,pack.bounds)
       ? [{id:'coordinate',name:'Ponto informado',precision:'coordinate',point:query.point}] : [];
@@ -56,8 +56,9 @@ export function createDestinationIndex(pack) {
       const words=item.normalized.split(' ');
       return terms.every(term=>words.some(word=>word.startsWith(term))) ? 3 : Infinity;
     }
-    const ranked=items=>items.map(item=>({item,rank:score(item)})).filter(result=>Number.isFinite(result.rank))
-      .sort((a,b)=>a.rank-b.rank || a.item.name.localeCompare(b.item.name,'pt-BR'));
+    const ranked=items=>items.map(item=>({item,rank:score(item),meters:near?distance(near,item.point):0}))
+      .filter(result=>Number.isFinite(result.rank))
+      .sort((a,b)=>a.rank-b.rank || a.meters-b.meters || a.item.name.localeCompare(b.item.name,'pt-BR'));
     if (query.house) {
       const exact=ranked(numbered.filter(item=>item.number===query.house));
       if(exact.length) return exact.slice(0,6).map(({item})=>item);

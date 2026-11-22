@@ -14,7 +14,10 @@ export function firestoreStore(database, namespace) {
       await database.runTransaction(async tx=>{
         const last=(await tx.get(ref)).data()?.at ?? 0;
         const now=Date.now();
-        if(now-last<1250) throw new HttpError(429,'O serviço nacional está ocupado. Tente novamente em instantes.');
+        const retryAfterMs=1250-(now-last);
+        if(retryAfterMs>0) throw Object.assign(
+          new HttpError(429,'O serviço nacional está ocupado. Tente novamente em instantes.'),{retryAfterMs}
+        );
         tx.set(ref,{at:now});
       });
     },

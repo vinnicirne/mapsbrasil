@@ -23,7 +23,10 @@ const dist=resolve('dist');
 const lastCall=new Map();
 const national=nationalNavigation({limit:async kind=>{
   const now=Date.now();
-  if(now-(lastCall.get(kind)??0)<1250) throw new HttpError(429,'O serviço nacional está ocupado. Tente novamente em instantes.');
+  const retryAfterMs=1250-(now-(lastCall.get(kind)??0));
+  if(retryAfterMs>0) throw Object.assign(
+    new HttpError(429,'O serviço nacional está ocupado. Tente novamente em instantes.'),{retryAfterMs}
+  );
   lastCall.set(kind,now);
 }});
 const dbDir=resolve(process.env.DATA_DIR ?? (demo?'data/demo':'data'));
@@ -84,7 +87,7 @@ async function handle(request,response) {
     if (['search','route'].includes(action) && method==='POST') {
       access.requireApproved(user,company);
       const input=await body(request);
-      return json(response,action==='search'?await national.search(input.query):await national.route(input));
+      return json(response,action==='search'?await national.search(input.query,input.near):await national.route(input));
     }
     if (action==='pack' && method==='GET') {
       access.requireApproved(user,company);
@@ -114,7 +117,9 @@ async function handle(request,response) {
 }
 const server=createServer((request,response)=>handle(request,response).catch(error=>{
   if (!error.status) console.error(error);
-  if (!response.headersSent) json(response,{error:error.status?error.message:'Falha temporária no serviço.'},error.status ?? 500);
+  if (!response.headersSent) json(response,{
+    error:error.status?error.message:'Falha temporária no serviço.',retryAfterMs:error.retryAfterMs
+  },error.status ?? 500);
   else response.end();
 }));
 server.listen(port,host,()=>console.log('MapsBrasil disponível em http://'+host+':'+port));

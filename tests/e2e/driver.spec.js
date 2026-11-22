@@ -44,7 +44,12 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(member).toContainText('Aprovado');
 
   await page.goto('/');
-  await page.route('**/api/companies/piloto/search',route=>route.fulfill({json:[]}));
+  let releaseLocal;
+  const nationalPending=new Promise(resolve=>{releaseLocal=resolve;});
+  await page.route('**/api/companies/piloto/search',async route=>{
+    await nationalPending;
+    await route.fulfill({json:[]}).catch(()=>{});
+  });
   await expect(menu).toBeHidden();
   const mapBounds=await page.getByRole('region',{name:'Mapa de navegação',exact:true}).boundingBox();
   expect(mapBounds.width).toBe(390);
@@ -59,7 +64,9 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(openMenu).toHaveAttribute('aria-expanded','false');
   await page.getByLabel('Para onde você vai?').fill('Rua Jorge Rachid, São Gonçalo');
   const localResult=page.getByRole('button',{name:/Rua Jorge Rachid.*Ponto aproximado/i});
+  await expect(page.getByText('Resultados da região. Buscando mais endereços…')).toBeVisible();
   await localResult.click();
+  releaseLocal();
   await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
   await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
   await page.getByRole('button',{name:'Encerrar'}).click();
@@ -166,9 +173,13 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   const saoPaulo=[-46.658,-23.558];
   const destino=[-46.652,-23.562];
   await locate(driver,saoPaulo);
-  await page.route('**/api/companies/piloto/search',route=>route.fulfill({json:[{
-    id:'sp',name:'Avenida Paulista, 1578',locality:'São Paulo · SP',point:destino,precision:'address'
-  }]}));
+  let searchCalls=0;
+  await page.route('**/api/companies/piloto/search',route=>{
+    searchCalls++;
+    return route.fulfill({json:[{
+      id:'sp',name:'Avenida Paulista, 1578',locality:'São Paulo · SP',point:destino,precision:'address'
+    }]});
+  });
   await page.route('**/api/companies/piloto/route',route=>{
     expect(route.request().postDataJSON().start).toEqual(saoPaulo);
     return route.fulfill({json:{profile:'national',meters:900,seconds:160,legs:[{
@@ -178,7 +189,11 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
     }]}});
   });
   await page.getByLabel('Para onde você vai?').fill('Avenida Paulista, 1578, São Paulo');
+  await expect(page.getByRole('button',{name:/Avenida Paulista, 1578.*São Paulo/})).toBeVisible();
+  await page.getByLabel('Para onde você vai?').clear();
+  await page.getByLabel('Para onde você vai?').fill('Avenida Paulista, 1578, São Paulo');
   await page.getByRole('button',{name:/Avenida Paulista, 1578.*São Paulo/}).click();
+  expect(searchCalls).toBe(1);
   await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
   await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
   await driver.setOffline(true);

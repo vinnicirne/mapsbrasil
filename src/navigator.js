@@ -72,6 +72,8 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   let monitor=riskMonitor();
   let worker, requestId=0;
   const pending=new Map();
+  const addressCache=new Map();
+  let searchPosition, searchPositionAt=0, locating;
   const audio=new Audio();
   let hasStoredPack=false,connected=false,nationalMap,nationalLoading,findLocal,factions,alertFactions,factionLoad,selectedSearchPoint,lastReroute=0,planning=false;
   function openMenu() {
@@ -109,18 +111,42 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     openMenu();
   };
   const map=createMap($('map'),onMapPoint);
+  function locateSearch() {
+    if (Date.now()-searchPositionAt<30000 || !navigator.geolocation) return Promise.resolve(searchPosition);
+    if (locating) return locating;
+    locating=new Promise(resolve=>{
+      const settle=point=>{
+        searchPosition=point;
+        searchPositionAt=Date.now();
+        resolve(point);
+      };
+      navigator.geolocation.getCurrentPosition(
+        ({coords})=>settle(coords.accuracy<=5000 ? [coords.longitude,coords.latitude].map(value=>Number(value.toFixed(3))) : undefined),
+        ()=>settle(undefined),
+        {timeout:3500,maximumAge:5000}
+      );
+    }).finally(()=>{locating=undefined;});
+    return locating;
+  }
+  $('destination-query').addEventListener('focus',()=>void locateSearch());
   const finder=createDestinationFinder($('destination-finder'),{
-    find:async address=>{
-      const local=findLocal?.(address) ?? [];
+    find:async (address,{signal,preview})=>{
+      const near=await Promise.race([locateSearch(),new Promise(resolve=>setTimeout(resolve,180))]);
+      signal.throwIfAborted();
+      const local=findLocal?.(address,near) ?? [];
       if (!connected && !findLocal) throw Error('Abra o mapa da região com internet antes de pesquisar offline.');
       if (!connected || local.some(result=>result.precision==='address' || result.precision==='coordinate')) return local;
-      try {
-        const national=await searchNational(address);
-        return national.length ? national : local;
-      } catch(error) {
-        if (local.length) return local;
-        throw error;
+      const key=address.normalize().toLocaleLowerCase('pt-BR').replace(/\s+/g,' ')+'|'+(near?.join(',')??'');
+      const cached=addressCache.get(key);
+      if(cached?.expires>Date.now()) return cached.results.length ? cached.results : local;
+      addressCache.delete(key);
+      preview(local);
+      const national=await searchNational(address,near,signal);
+      if(!signal.aborted) {
+        if(addressCache.size>=30) addressCache.delete(addressCache.keys().next().value);
+        addressCache.set(key,{results:national,expires:Date.now()+120000});
       }
+      return national.length ? national : local;
     },
     select:result=>{
       selectedSearchPoint=result?.point;
@@ -597,6 +623,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
       stopNavigation();
       route=snapshot?.route;origin=snapshot?.origin;position=undefined;selectedDestination=undefined;
       finder.reset();
+      addressCache.clear();
       legIndex=snapshot?.legIndex ?? 0;completed=snapshot?.completed ?? 0;progress=0;
       $('stops').value=snapshot?.stopsText ?? '';
       $('origin-state').textContent=origin?'Origem salva':'Origem pelo GPS';

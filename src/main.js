@@ -87,20 +87,23 @@ const report=message=>{
 };
 let packLoad;
 const navigatorUI=makeNavigator($('navigation'),{download,prepareDestination,persist,reportError:report,
-  searchNational:query=>apiFor('search',{method:'POST',body:{query}}),
+  searchNational:(query,near,signal)=>apiFor('search',{method:'POST',body:{query,near},signal}),
   routeNational:(start,stops)=>apiFor('route',{method:'POST',body:{start,stops}})});
 $('route-menu-title').parentElement.after($('company').closest('.company-bar'));
 
-async function api(path,{method='GET',body,raw=false}={}) {
+async function api(path,{method='GET',body,raw=false,signal}={}) {
   const token=await auth?.token();
   if (!token) throw Object.assign(Error('Entre para continuar.'),{status:401});
+  const timeout=AbortSignal.timeout(12000);
   const result=await fetch('/api'+path,{method,headers:{
     Authorization:'Bearer '+token,
     ...(body?{'content-type':'application/json'}:{})
-  },body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(12000)});
+  },body:body?JSON.stringify(body):undefined,signal:signal?AbortSignal.any([signal,timeout]):timeout});
   if (!result.ok) {
     const payload=await result.json().catch(()=>({}));
-    throw Object.assign(Error(payload.error ?? 'Serviço temporariamente indisponível.'),{status:result.status});
+    throw Object.assign(Error(payload.error ?? 'Serviço temporariamente indisponível.'),{
+      status:result.status,retryAfterMs:payload.retryAfterMs
+    });
   }
   return raw?result:result.json();
 }

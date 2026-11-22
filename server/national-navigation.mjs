@@ -1,4 +1,6 @@
 import {HttpError} from './membership-core.mjs';
+import {foldAddress} from '../src/navigation/destinations.js';
+import {distance} from '../src/navigation/geometry.js';
 
 const nationalBounds=[-74,-34,-28,6];
 const point=value=>Array.isArray(value) && value.length===2 && value.every(Number.isFinite)
@@ -7,9 +9,9 @@ const origin='https://mapsbrasil.vercel.app';
 const headers={'user-agent':'MapsBrasilDrive/0.1 (+https://mapsbrasil.vercel.app)',referer:origin+'/'};
 const directions={'left':'left','sharp left':'left','slight left':'left','right':'right','sharp right':'right','slight right':'right','uturn':'uturn'};
 
-async function request(url) {
+async function request(url,timeout=8000) {
   try {
-    const response=await fetch(url,{headers,signal:AbortSignal.timeout(8000)});
+    const response=await fetch(url,{headers,signal:AbortSignal.timeout(timeout)});
     if(response.status===429) throw new HttpError(429,'O serviço nacional está ocupado. Tente novamente em instantes.');
     if(!response.ok) throw Error();
     return await response.json();
@@ -58,15 +60,23 @@ export function nationalNavigation({limit=async()=>{},env=process.env}={}) {
   const geocoder=env.DRIVE_GEOCODER_URL ?? 'https://photon.komoot.io/api/';
   const router=env.DRIVE_OSRM_URL ?? 'https://routing.openstreetmap.de/routed-car/route/v1/driving/';
   return {
-    async search(query) {
+    async search(query,near) {
       if(typeof query!=='string' || query.trim().length<3 || query.length>180) throw new HttpError(400,'Digite um endereço de até 180 caracteres.');
+      if (!point(near)) near=undefined;
       await limit('geocoder');
       const url=new URL(geocoder);
       url.searchParams.set('q',query.trim());
       url.searchParams.set('bbox',nationalBounds.join(','));
       url.searchParams.set('limit','8');
-      const data=await request(url);
+      if (near) {
+        url.searchParams.set('lon',String(near[0]));
+        url.searchParams.set('lat',String(near[1]));
+      }
+      const data=await request(url,5000);
       const wantedNumber=query.match(/\b(\d+[a-z]?)\s*(?=,|$)/i)?.[1] ?? query.match(/,\s*(\d+[a-z]?)\b/i)?.[1];
+      const [streetQuery,...suffix]=query.split(',').map(foldAddress);
+      const namedStreet=streetQuery.replace(/\s+\d+[a-z]?$/,'');
+      const wantedLocality=suffix.filter(part=>part && !/^\d+[a-z]?$/.test(part));
       const results=[];
       for(const [index,feature] of (data.features ?? []).entries()){
         const p=feature.properties;
@@ -76,10 +86,19 @@ export function nationalNavigation({limit=async()=>{},env=process.env}={}) {
         if(!street) continue;
         const locality=[p.district,p.city ?? p.county,p.state].filter((value,i,list)=>value && list.indexOf(value)===i).join(' · ');
         const missing=!!wantedNumber && String(p.housenumber ?? '').toLowerCase()!==wantedNumber.toLowerCase();
-        results.push({id:'br:'+index,name:street,locality,point:coordinates,numberMissing:missing,
-          precision:p.housenumber && !missing?'address':'street'});
+        const match={id:'br:'+index,name:street,locality,point:coordinates,numberMissing:missing,
+          precision:p.housenumber && !missing?'address':'street'};
+        const name=foldAddress(p.street ?? p.name);
+        const places=foldAddress(locality);
+        const streetMismatch=!(name.startsWith(namedStreet) || namedStreet.startsWith(name+' ') || namedStreet===name);
+        const trailingPlace=namedStreet.startsWith(name+' ') ? namedStreet.slice(name.length+1).replace(/^\d+[a-z]?\s*/,'') : '';
+        const localityMismatch=[...wantedLocality,trailingPlace].some(part=>part.length>2 && !places.includes(part));
+        results.push({match,localityMismatch,streetMismatch,meters:near?distance(near,coordinates):0});
       }
-      return results.sort((a,b)=>Number(a.numberMissing)-Number(b.numberMissing)).slice(0,6);
+      return results.sort((a,b)=>Number(a.localityMismatch)-Number(b.localityMismatch)
+        || Number(a.streetMismatch)-Number(b.streetMismatch)
+        || Number(a.match.numberMissing)-Number(b.match.numberMissing) || a.meters-b.meters)
+        .slice(0,6).map(({match})=>match);
     },
     async route({start,stops}) {
       if(!point(start) || !Array.isArray(stops) || !stops.length || stops.length>30 || stops.some(stop=>!point(stop?.point) || typeof stop.name!=='string' || stop.name.length>180)) {
