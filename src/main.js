@@ -327,13 +327,16 @@ async function listMembers() {
   }
 }
 
-$('login-group').addEventListener('click',run(async event=>{
-  const role=event.target.closest('[data-demo]')?.dataset.demo;
-  if (role) await auth.demoLogin(role);
-  else if (event.target.closest('#sign-in')) await auth.login();
-  else return;
+$('sign-in').onclick=run(async()=>{
+  await auth.login();
   await refresh();
-}));
+});
+for (const button of $('demo-logins').querySelectorAll('[data-demo]')) {
+  button.onclick=run(async()=>{
+    await auth.demoLogin(button.dataset.demo);
+    await refresh();
+  });
+}
 const credentials=()=>[$('login-email').value,$('login-password').value];
 $('email-login').onsubmit=run(async()=>{
   await auth.emailLogin(...credentials());

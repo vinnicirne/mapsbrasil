@@ -146,3 +146,26 @@ test('frontend distingue API ausente de dispositivo offline e permite nova tenta
   await expect(page.getByRole('heading',{name:'Entre para navegar'})).toBeVisible();
   await expect(page.locator('#network')).toHaveText('Online');
 });
+
+test('clicar em Entrar com e-mail envia o formulário para o Firebase Auth',async({page})=>{
+  const email='motorista@example.test';
+  const password='Dr1!teste-do-formulario';
+  await page.route('**/api/config',route=>route.fulfill({json:{demo:false,firebase:{
+    projectId:'drive-form-test',authDomain:'drive-form-test.firebaseapp.com',apiKey:'example-test-api-key',appId:'test-app'
+  }}}));
+  await page.route('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?**',route=>route.fulfill({
+    status:400,json:{error:{message:'INVALID_LOGIN_CREDENTIALS'}},
+    headers:{'access-control-allow-origin':'*'}
+  }));
+  await page.goto('/');
+  const submit=page.getByRole('button',{name:'Entrar com e-mail'});
+  await submit.waitFor();
+  await page.getByLabel('E-mail',{exact:true}).fill(email);
+  await page.getByLabel('Senha',{exact:true}).fill(password);
+  const [request]=await Promise.all([
+    page.waitForRequest(req=>req.method()==='POST' && req.url().includes('/accounts:signInWithPassword?'),{timeout:6000}),
+    submit.click()
+  ]);
+  expect(request.postDataJSON()).toMatchObject({email,password,returnSecureToken:true});
+  await expect(page.getByRole('alert')).toHaveText('E-mail ou senha inválidos.');
+});
