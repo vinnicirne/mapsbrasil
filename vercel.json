@@ -10,6 +10,10 @@
       "destination": "/api/bridge?endpoint=companies/:company/:action"
     },
     {
+      "source": "/api/empresa/:domain/:action",
+      "destination": "/api/bridge?endpoint=empresa/:domain/:action"
+    },
+    {
       "source": "/gestao",
       "destination": "/index.html"
     }

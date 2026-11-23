@@ -1,5 +1,6 @@
 import {cert,getApps,initializeApp} from 'firebase-admin/app';
 import {getFirestore} from 'firebase-admin/firestore';
+import {randomBytes} from 'node:crypto';
 import {hash,HttpError} from './membership-core.mjs';
 
 export function firestoreStore(database, namespace) {
@@ -7,8 +8,25 @@ export function firestoreStore(database, namespace) {
   const base=database.collection('drive_access').doc(namespace);
   const grants=base.collection('memberships');
   const invites=base.collection('invites');
+  const companies=base.collection('companies');
   const member=(company,uid)=>grants.doc(hash(JSON.stringify([company,uid])));
   return {
+    async getCompany(id) {return (await companies.doc(id).get()).data();},
+    async companyByCode(code) {
+      const result=await companies.where('joinCode','==',code).limit(1).get();
+      return result.docs[0]?.data();
+    },
+    async ensureCompany(domain,name) {
+      const id='corp_'+hash(domain);
+      const ref=companies.doc(id);
+      return database.runTransaction(async tx=>{
+        const existing=(await tx.get(ref)).data();
+        if (existing) return existing;
+        const company={id,name,corporateDomain:domain,joinCode:randomBytes(24).toString('base64url'),adminUids:[]};
+        tx.create(ref,company);
+        return company;
+      });
+    },
     async reserveProvider(kind) {
       const ref=database.collection('drive_provider_limits').doc(kind);
       await database.runTransaction(async tx=>{
@@ -40,7 +58,7 @@ export function firestoreStore(database, namespace) {
     async consumeInvite(key,uid,inspect) {
       const ref=invites.doc(key);
       await database.runTransaction(async tx=>{
-        const grant=inspect((await tx.get(ref)).data());
+        const grant=await inspect((await tx.get(ref)).data());
         const membership=member(grant.company,uid);
         const prev=(await tx.get(membership)).data();
         tx.set(membership,{...grant,requested:prev?.requested ?? grant.requested});

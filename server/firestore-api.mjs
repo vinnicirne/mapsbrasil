@@ -3,6 +3,8 @@ import {firebaseWebConfig,hash,HttpError,membershipService} from './membership-c
 import {configuredFirestore} from './firestore-store.mjs';
 import {authVerifier} from './firebase-token.mjs';
 import {nationalNavigation} from './national-navigation.mjs';
+import {corporateDomainPattern,corporateManagement} from './corporate-management.mjs';
+import {driverRegistration} from './driver-registration.mjs';
 
 const responseHeaders={'cache-control':'no-store','x-content-type-options':'nosniff'};
 const json=(value,status=200)=>Response.json(value,{status,headers:responseHeaders});
@@ -26,16 +28,48 @@ async function readBody(request) {
   throw new HttpError(400,'Dados inválidos.');
 }
 
-export function createDriveHandler({access, firebase, packBytes, national}) {
+export function createDriveHandler({access, firebase, packBytes, national, corporate, registerDriver}) {
   const pack=packBytes && JSON.parse(packBytes);
   const packInfo=pack && {version:pack.version,region:pack.region,size:packBytes.length,sha256:hash(packBytes),
     bounds:pack.bounds,dataDate:pack.dataDate,riskMode:pack.riskMode};
   return async request=>{
+    let corporateHeaders;
+    const reply=(value,status=200)=>corporateHeaders
+      ? Response.json(value,{status,headers:{...responseHeaders,...corporateHeaders}})
+      : json(value,status);
     try {
       const url=new URL(request.url);
       const named=url.searchParams.getAll('endpoint');
       const endpoint=named.length===1 ? named[0] : named.length===0 ? url.pathname.slice('/api/'.length) : '';
       const method=request.method;
+      const corporateRoute=/^empresa\/([a-z0-9.-]+)\/(motoristas|convite|decisao|cadastro)$/.exec(endpoint);
+      if (corporateRoute) {
+        if (!corporate || request.headers.get('origin')!==corporate.origin) {
+          throw new HttpError(403,'Integração com o Painel Empresa indisponível.');
+        }
+        corporateHeaders={'access-control-allow-origin':corporate.origin,vary:'Origin'};
+        if (method==='OPTIONS') return new Response(null,{status:204,headers:{
+          ...corporateHeaders,'access-control-allow-methods':'GET, POST','access-control-allow-headers':'Authorization, Content-Type',
+          'access-control-max-age':'600'
+        }});
+        const [,domain,action]=corporateRoute;
+        if (!corporateDomainPattern.test(domain)) throw new HttpError(400,'Identificador de empresa inválido.');
+        if (method!==(action==='motoristas'?'GET':'POST')) throw new HttpError(405,'Método indisponível.');
+        const {company,user}=await corporate.authorize(domain,request.headers.get('authorization'));
+        if (action==='motoristas') return reply({joinCode:company.joinCode,members:await access.members(user,company.id)});
+        const input=await readBody(request);
+        if (action==='convite') return reply(await access.invite(user,company.id,input.email));
+        if (action==='cadastro') {
+          if (!registerDriver) throw new HttpError(503,'Cadastro direto indisponível.');
+          const driver=await registerDriver(input.email,input.password);
+          let linked=true;
+          try { await access.enroll(user,company.id,driver); }
+          catch { linked=false; }
+          return reply({email:driver.email,verificationSent:driver.verificationSent,linked},201);
+        }
+        if (typeof input.uid!=='string' || !input.uid || input.uid.length>128) throw new HttpError(400,'Conta inválida.');
+        return reply({joinCode:company.joinCode,members:await access.depart(user,company.id,input.uid,input.status)});
+      }
       const companyRoute=/^companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route)$/.exec(endpoint);
       if (endpoint==='config' && method==='GET') return json({firebase,demo:false,signup:null});
       if (!companyRoute && !['me','join','accept'].includes(endpoint)) throw new HttpError(404,'Recurso não encontrado.');
@@ -73,7 +107,7 @@ export function createDriveHandler({access, firebase, packBytes, national}) {
       throw new HttpError(405,'Método indisponível.');
     } catch (error) {
       if (!(error instanceof HttpError)) console.error('Erro na API do Drive:',error.code ?? error.name);
-      return json({error:error instanceof HttpError ? error.message : 'Falha temporária no serviço.',retryAfterMs:error.retryAfterMs},error.status ?? 500);
+      return reply({error:error instanceof HttpError ? error.message : 'Falha temporária no serviço.',retryAfterMs:error.retryAfterMs},error.status ?? 500);
     }
   };
 }
@@ -83,13 +117,17 @@ export async function configureDriveHandler(env) {
   if (!firebase) throw new HttpError(503,'Login ainda não configurado.');
   const companies=JSON.parse(env.COMPANIES_JSON ?? '[]');
   if (!Array.isArray(companies) || companies.some(c=>!c || !/^[\w-]+$/.test(c.id) || typeof c.name!=='string' ||
-      typeof c.joinCode!=='string' || !c.joinCode || !Array.isArray(c.adminUids) || c.adminUids.some(uid=>typeof uid!=='string'))) {
+      typeof c.joinCode!=='string' || !c.joinCode || !Array.isArray(c.adminUids) || c.adminUids.some(uid=>typeof uid!=='string') ||
+      (c.corporateDomain!==undefined && (typeof c.corporateDomain!=='string' || !corporateDomainPattern.test(c.corporateDomain))))) {
     throw Error('COMPANIES_JSON inválido.');
   }
+  const domains=companies.flatMap(company=>company.corporateDomain?[company.corporateDomain]:[]);
+  if (new Set(domains).size!==domains.length) throw Error('Empresas do Painel Empresa duplicadas.');
   const store=configuredFirestore(env);
   const access=membershipService({store,companies,authenticate:authVerifier(firebase),privateKey:env.DRIVE_LEASE_PRIVATE_KEY});
   const packBytes=env.DRIVE_PACK_PROFILE==='sample'
     ? (env.ALLOW_SAMPLE_PACK==='1' ? await readFile(new URL('../public/packs/rio-do-ouro.json',import.meta.url)) : null)
     : await readFile(new URL('./packs/rio-do-ouro-faccoes.json',import.meta.url));
-  return createDriveHandler({access,firebase,packBytes,national:nationalNavigation({env,limit:kind=>store.reserveProvider(kind)})});
+  return createDriveHandler({access,firebase,packBytes,corporate:corporateManagement({env,companies,ensureCompany:store.ensureCompany}),
+    registerDriver:driverRegistration(firebase.apiKey),national:nationalNavigation({env,limit:kind=>store.reserveProvider(kind)})});
 }

@@ -65,6 +65,14 @@ A implantação pode rodar o PWA e a API no mesmo projeto Vercel. O Auth do pain
 - `FIRESTORE_PROJECT_ID` identifica o projeto de dados do Drive. Armazene a credencial de uma conta de serviço com papel Datastore User em `FIRESTORE_SERVICE_ACCOUNT_JSON`, como segredo da Vercel. A conta deve pertencer ao projeto configurado.
 - `DRIVE_LEASE_PRIVATE_KEY` recebe uma chave EC P-256 em PEM PKCS#8, como segredo da Vercel. Use uma chave distinta em homologação e produção e mantenha-a estável entre deploys do grupo.
 - `DRIVE_DATA_NAMESPACE` define a partição de vínculos e convites. Use valores diferentes em Preview e Production.
+
+### Gestão de motoristas no Painel Empresa
+
+Configure `DRIVE_CORPORATE_ORIGIN` com a origem HTTPS do Painel Empresa, `DRIVE_CORPORATE_AUTH_PROJECT` com seu projeto Firebase Auth e `DRIVE_CORPORATE_DATABASE` com o ID do banco Firestore do painel (use `(default)` para o banco padrão). No frontend do painel, `VITE_MAPSBRASIL_DRIVE_URL` deve apontar para o Drive do mesmo ambiente.
+
+Cada empresa ativa recebe um vínculo e um código de autocadastro próprios na primeira abertura da aba **Motoristas** por um administrador. Para reaproveitar um cadastro legado, use `corporateDomain` na entrada correspondente em `COMPANIES_JSON` antes de abrir a aba pela primeira vez, preservando o identificador e os vínculos que já existem.
+
+A aba **Motoristas** usa a sessão do Painel Empresa. A API valida o token e consulta a empresa ativa e as permissões do administrador no Firestore corporativo. A API do Drive guarda os vínculos e os convites no Firestore do Drive. Convites aceitos usam o e-mail verificado do motorista e concedem acesso ao Drive. O cadastro direto cria uma conta no Firebase Auth do Drive e vincula o novo UID à empresa. O motorista confirma o e-mail antes de acessar. Contas existentes entram na empresa por convite ou autocadastro.
 - O pacote padrão publicado inclui o recorte de Rio do Ouro e os polígonos de facções disponíveis nessa área. Use `DRIVE_PACK_PROFILE=sample` e `ALLOW_SAMPLE_PACK=1` somente para exibir o polígono simulado no backend da Vercel.
 
 O backend local conserva o SQLite para demonstração independente. Para uma hospedagem separada, a ponte na Vercel também aceita `MAPSBRASIL_API_ORIGIN` quando `FIRESTORE_PROJECT_ID` estiver ausente.
