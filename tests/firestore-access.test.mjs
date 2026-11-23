@@ -76,7 +76,7 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
     gestor:{companyDomain:'empresa.example',status:'approved',companyRole:'company_admin'},
     suspenso:{companyDomain:'empresa.example',status:'approved',companyRole:'company_admin',licenseStatus:'suspended'},
     comum:{companyDomain:'empresa.example',status:'approved',companyRole:'member'},
-    superadmin:{status:'approved'}
+    superadmin:{status:'approved',role:'admin'}
   };
   const env={DRIVE_CORPORATE_ORIGIN:origin,DRIVE_CORPORATE_AUTH_PROJECT:'painel',DRIVE_CORPORATE_DATABASE:'corporativo'};
   const store=memory();
@@ -108,9 +108,7 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
       assert.equal(path,'users/'+actor);
       return Response.json({fields:Object.fromEntries(Object.entries(profiles[actor]).map(([key,stringValue])=>[key,{stringValue}]))});
     }
-    if (path==='corporate_companies') {
-      return actor==='superadmin'?Response.json({documents:[]}):new Response(null,{status:403});
-    }
+    assert.ok(path.startsWith('corporate_companies/'));
     return Response.json({fields:{active:{booleanValue:active}}});
   });
   const access=membershipService({store,companies,authenticate:auth,privateKey});

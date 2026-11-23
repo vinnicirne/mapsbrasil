@@ -70,6 +70,8 @@ A implantação pode rodar o PWA e a API no mesmo projeto Vercel. O Auth do pain
 
 Configure `DRIVE_CORPORATE_ORIGIN` com a origem HTTPS do Painel Empresa, `DRIVE_CORPORATE_AUTH_PROJECT` com seu projeto Firebase Auth e `DRIVE_CORPORATE_DATABASE` com o ID do banco Firestore do painel (use `(default)` para o banco padrão). No frontend do painel, `VITE_MAPSBRASIL_DRIVE_URL` deve apontar para o Drive do mesmo ambiente.
 
+Quando o painel autorizar SuperAdmins por e-mail verificado durante a inicialização de contas, mantenha a mesma lista, separada por vírgulas, em `DRIVE_CORPORATE_BOOTSTRAP_ADMINS`.
+
 Cada empresa ativa recebe um vínculo e um código de autocadastro próprios na primeira abertura da aba **Motoristas** por um administrador. Para reaproveitar um cadastro legado, use `corporateDomain` na entrada correspondente em `COMPANIES_JSON` antes de abrir a aba pela primeira vez, preservando o identificador e os vínculos que já existem.
 
 A aba **Motoristas** usa a sessão do Painel Empresa. A API valida o token e consulta a empresa ativa e as permissões do administrador no Firestore corporativo. A API do Drive guarda os vínculos e os convites no Firestore do Drive. Convites aceitos usam o e-mail verificado do motorista e concedem acesso ao Drive. O cadastro direto cria uma conta no Firebase Auth do Drive e vincula o novo UID à empresa. O motorista confirma o e-mail antes de acessar. Contas existentes entram na empresa por convite ou autocadastro.

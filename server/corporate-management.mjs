@@ -1,5 +1,5 @@
 import {authVerifier} from './firebase-token.mjs';
-import {HttpError} from './membership-core.mjs';
+import {emailOf,HttpError} from './membership-core.mjs';
 
 export const corporateDomainPattern=/^[a-z0-9][a-z0-9.-]{1,118}[a-z0-9]$/;
 
@@ -13,13 +13,13 @@ export function corporateManagement({env,companies,ensureCompany,verifyToken}) {
     throw Error('Configuração corporativa inválida.');
   }
   const byDomain=new Map(companies.filter(company=>company.corporateDomain).map(company=>[company.corporateDomain,company]));
+  const superAdmins=new Set((env.DRIVE_CORPORATE_BOOTSTRAP_ADMINS ?? '').split(',').map(emailOf).filter(Boolean));
   const authenticate=verifyToken ?? authVerifier({projectId});
   const base='https://firestore.googleapis.com/v1/projects/'+projectId+'/databases/'+encodeURIComponent(databaseId)+'/documents/';
 
-  async function read(path,authorization,mask=[],list=false) {
+  async function read(path,authorization,mask) {
     const url=new URL(base+path);
     for (const field of mask) url.searchParams.append('mask.fieldPaths',field);
-    if(list) url.searchParams.set('pageSize','1');
     try {
       const response=await fetch(url,{
         headers:{authorization},redirect:'error',signal:AbortSignal.timeout(5000)
@@ -35,21 +35,21 @@ export function corporateManagement({env,companies,ensureCompany,verifyToken}) {
   return {
     origin:origin.origin,
     async authorize(domain,authorization) {
-      const {uid}=await authenticate(authorization);
+      const {uid,email}=await authenticate(authorization);
       if (!/^[\w-]{1,128}$/.test(uid)) throw new HttpError(401,'Conta corporativa inválida.');
       const [record,user]=await Promise.all([
         read('corporate_companies/'+domain,authorization,['active','companyName']),
-        read('users/'+encodeURIComponent(uid),authorization,['status','licenseStatus','companyRole','companyDomain','domain'])
+        read('users/'+encodeURIComponent(uid),authorization,['role','status','licenseStatus','companyRole','companyDomain','domain'])
       ]);
       const profile=user?.fields;
       if (record?.fields?.active?.booleanValue!==true || !profile) {
         throw new HttpError(403,'Acesso à gestão de motoristas restrito aos administradores da empresa ativa.');
       }
       const companyDomain=profile.companyDomain?.stringValue || profile.domain?.stringValue;
+      const isSuperAdmin=profile.role?.stringValue==='admin' || superAdmins.has(email);
       const canManage=profile.status?.stringValue==='approved' && profile.licenseStatus?.stringValue!=='suspended' &&
         profile.companyRole?.stringValue==='company_admin' && companyDomain===domain;
-      // The territorial rules allow listing companies only for SuperAdmins.
-      if (!canManage && !await read('corporate_companies',authorization,['active'],true)) {
+      if (!isSuperAdmin && !canManage) {
         throw new HttpError(403,'Acesso à gestão de motoristas restrito aos administradores da empresa.');
       }
       const company=byDomain.get(domain) ?? await ensureCompany(domain,record.fields.companyName?.stringValue || domain);
