@@ -140,7 +140,10 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await page.getByRole('button',{name:'Iniciar navegação',exact:true}).click();
   await expect(page.locator('#turn-name')).toHaveText('Vire à esquerda');
   await expect(page.locator('#travel-time')).toContainText('min');
-  await expect.poll(()=>mapCenterColor(page)).toEqual([35,98,222]);
+  await expect.poll(async()=>{
+    const [red,green,blue]=await mapCenterColor(page);
+    return red>185 && green>125 && blue<100;
+  }).toBe(true);
   await expect(page.getByRole('button',{name:'Finalizar rota'})).toBeInViewport();
   await page.screenshot({path:test.info().outputPath('navegacao-offline.png')});
 

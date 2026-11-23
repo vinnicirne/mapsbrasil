@@ -69,7 +69,7 @@ const packInfo=pack ? {version:pack.version,region:pack.region,size:packFileByte
   bounds:pack.bounds,dataDate:pack.dataDate,riskMode:pack.riskMode} : null;
 
 const type={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8',
-  '.json':'application/json; charset=utf-8','.webmanifest':'application/manifest+json','.png':'image/png','.wav':'audio/wav','.txt':'text/plain; charset=utf-8'};
+  '.json':'application/json; charset=utf-8','.webmanifest':'application/manifest+json','.png':'image/png','.svg':'image/svg+xml','.wav':'audio/wav','.txt':'text/plain; charset=utf-8'};
 const json=(response,data,status=200)=>{
   response.writeHead(status,{'content-type':type['.json'],'cache-control':'no-store'});
   response.end(JSON.stringify(data));

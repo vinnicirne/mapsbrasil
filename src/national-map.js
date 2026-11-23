@@ -2,7 +2,7 @@ import * as maplibregl from 'maplibre-gl';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {factionColors} from './navigation/factions.js';
-import {drawCar} from './car-marker.js';
+import carUrl from './yellow-car.svg';
 
 maplibregl.setWorkerUrl(workerUrl);
 
@@ -13,14 +13,11 @@ export function createNationalMap(container,onPoint,onReady) {
   const map=new maplibregl.Map({container,style:'https://tiles.openfreemap.org/styles/positron',
     center:[-51,-15],zoom:3.4,minZoom:2,maxZoom:19,attributionControl:false});
   map.addControl(new maplibregl.AttributionControl({compact:true,customAttribution:'<a href="https://www.openstreetmap.org/fixthemap">Corrigir o mapa</a>'}),'bottom-left');
-  const car=document.createElement('canvas');
+  const car=document.createElement('img');
   car.className='car-marker';
-  car.width=64;car.height=80;
-  car.setAttribute('role','img');
-  car.setAttribute('aria-label','Veículo no mapa');
-  const context=car.getContext('2d');
-  context.setTransform(2,0,0,2,32,40);
-  drawCar(context);
+  car.src=carUrl;
+  car.alt='Veículo no mapa';
+  car.draggable=false;
   const vehicle=new maplibregl.Marker({element:car,rotationAlignment:'map',pitchAlignment:'viewport'});
   let state={}, lastRoute, lastLeg, lastRisk, ready=false;
   map.on('click',event=>{if(!state.nav) onPoint([event.lngLat.lng,event.lngLat.lat]);});

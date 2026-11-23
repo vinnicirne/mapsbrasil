@@ -1,5 +1,5 @@
 import {factionColors} from './navigation/factions.js';
-import {drawCar} from './car-marker.js';
+import carUrl from './yellow-car.svg';
 
 const radians=Math.PI/180;
 const limits=new WeakMap();
@@ -15,6 +15,7 @@ const palette = {motorway:'#a88746',trunk:'#bb995a',primary:'#c4aa70',secondary:
 
 export function createMap(canvas, onPoint) {
   const context=canvas.getContext('2d');
+  const car=new Image();
   let state={}, center=[-42.985,-22.884], zoom=1, angle=0, width=0,height=0, drag, renderFrame;
   const lonRatio=Math.cos(center[1]*radians);
   const scale=()=>36000*zoom;
@@ -114,13 +115,15 @@ export function createMap(canvas, onPoint) {
       if (nav) {
         const [x,y]=screen(position);
         context.save();context.translate(x,y);context.rotate((bearing ?? 0)*radians+angle);
-        drawCar(context);
+        if (car.naturalWidth) context.drawImage(car,-18,-13,36,26);
         context.restore();
       } else dot(position,'#2160d4','');
     }
   }
 
   const schedule=()=>{ cancelAnimationFrame(renderFrame);renderFrame=requestAnimationFrame(show); };
+  car.onload=schedule;
+  car.src=carUrl;
   const observer=new ResizeObserver(schedule);observer.observe(canvas);
   canvas.addEventListener('pointerdown',event=>{
     drag={x:event.offsetX,y:event.offsetY,center:[...center]};canvas.setPointerCapture(event.pointerId);

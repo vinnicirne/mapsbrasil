@@ -135,7 +135,7 @@ textarea { resize: vertical; min-height: 90px; }
 #email-login { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; } #email-login input + label { margin-top: 9px; }
 .reorder { display: flex; align-items: center; gap: 6px; font-size: .8rem; margin: 6px 0; } .reorder input { width: 17px; min-height: 17px; accent-color: #276652; }
 #national-map { position: absolute; inset: 0; }
-.car-marker { width: 32px; height: 40px; pointer-events: none; }
+.car-marker { width: 36px; height: 26px; pointer-events: none; }
 .icon-button { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; color: var(--dark); background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .icon-button:hover { background: #f2f7f2; }
 .close-menu { font-size: 1.55rem; }
