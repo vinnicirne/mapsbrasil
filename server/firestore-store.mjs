@@ -32,6 +32,11 @@ export function firestoreStore(database, namespace) {
     async pendingSos(company) {
       return (await alerts(company).where('acknowledgedAt','==',null).get()).docs.map(doc=>doc.data());
     },
+    async sosHistory(company,since,until) {
+      const snapshot=await alerts(company).where('createdAt','>=',since).where('createdAt','<',until)
+        .orderBy('createdAt','desc').select('id','createdAt','driverName','acknowledgedAt').get();
+      return snapshot.docs.map(doc=>doc.data());
+    },
     watchSos(company,onNext,onError) {
       return alerts(company).where('acknowledgedAt','==',null).onSnapshot(
         snapshot=>onNext(snapshot.docs.map(doc=>doc.data())),onError

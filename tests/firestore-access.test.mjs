@@ -42,6 +42,7 @@ function memory() {
       return {id:recorded.id,createdAt:recorded.createdAt};
     },
     pendingSos:pending,
+    sosHistory:(company,since,until)=>[...alerts.values()].filter(row=>row.company===company && row.createdAt>=since && row.createdAt<until),
     watchSos(company,onNext) {
       if (!watchers.has(company)) watchers.set(company,new Set());
       const list=watchers.get(company);
@@ -233,6 +234,17 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
   assert.equal((await call(carrierPath+'sos-atendido',{body:{id:help.id}})).status,200);
   await sendHelp(help);
   assert.deepEqual(await (await call(path+'sos?tree=1')).json(),[]);
+  const period='desde='+(Date.now()-3600000)+'&ate='+(Date.now()+3600000);
+  assert.equal((await call(path+'sos-historico?tree=1')).status,400);
+  assert.equal((await call(carrierPath+'sos-historico?'+period,{actor:'comum'})).status,403);
+  const [rootHistory,carrierHistory]=await Promise.all([
+    call(path+'sos-historico?tree=1&'+period).then(response=>response.json()),
+    call(carrierPath+'sos-historico?'+period,{actor:'transportadora'}).then(response=>response.json())
+  ]);
+  assert.deepEqual(rootHistory,carrierHistory);
+  assert.equal(rootHistory[0].id,help.id);
+  assert.ok(rootHistory[0].acknowledgedAt);
+  assert.equal(Object.hasOwn(rootHistory[0],'location'),false);
   const stale={id:randomUUID(),location:{...help.location,observedAt:Date.now()-121000}};
   assert.equal((await sendHelp(stale)).status,201);
   assert.equal((await (await call(carrierPath+'sos')).json())[0].location,null);
@@ -281,6 +293,7 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
     abort.abort();
   }
   assert.equal((await call(carrierPath+'motoristas')).status,403);
+  assert.deepEqual(await (await call(path+'sos-historico?tree=1&'+period)).json(),[]);
   assert.ok((await (await call(path+'localizacoes?tree=1')).json()).every(row=>row.companyDomain==='empresa.example'));
   const newPath='empresa/nova.example/';
   assert.equal((await call(newPath+'motoristas')).status,403);

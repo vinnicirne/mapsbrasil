@@ -45,7 +45,7 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
       const named=url.searchParams.getAll('endpoint');
       const endpoint=named.length===1 ? named[0] : named.length===0 ? url.pathname.slice('/api/'.length) : '';
       const method=request.method;
-      const corporateRoute=/^empresa\/([a-z0-9.-]+)\/(motoristas|convite|decisao|cadastro|localizacoes|perfil|sos|sos-atendido|sos-stream)$/.exec(endpoint);
+      const corporateRoute=/^empresa\/([a-z0-9.-]+)\/(motoristas|convite|decisao|cadastro|localizacoes|perfil|sos|sos-atendido|sos-stream|sos-historico)$/.exec(endpoint);
       if (corporateRoute) {
         if (!corporate || request.headers.get('origin')!==corporate.origin) {
           throw new HttpError(403,'Integração com o Painel Empresa indisponível.');
@@ -57,7 +57,7 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
         }});
         const [,domain,action]=corporateRoute;
         if (!corporateDomainPattern.test(domain)) throw new HttpError(400,'Identificador de empresa inválido.');
-        if (method!==(['motoristas','localizacoes','sos','sos-stream'].includes(action)?'GET':'POST')) throw new HttpError(405,'Método indisponível.');
+        if (method!==(['motoristas','localizacoes','sos','sos-stream','sos-historico'].includes(action)?'GET':'POST')) throw new HttpError(405,'Método indisponível.');
         const authorization=request.headers.get('authorization');
         const {company,user,direct}=await corporate.authorize(domain,authorization);
         async function loadBranches(load) {
@@ -72,6 +72,20 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
             }
           }));
           return rows.flat();
+        }
+        if (action==='sos-historico') {
+          if (!sos) throw new HttpError(503,'Histórico de SOS indisponível.');
+          const since=Number(url.searchParams.get('desde'));
+          const until=Number(url.searchParams.get('ate'));
+          const list=async (branch,record)=>(await sos.history(record.id,since,until)).map(
+            ({id,driverName,createdAt,acknowledgedAt})=>({
+              id,driverName,createdAt,acknowledgedAt,companyDomain:branch,companyName:record.name
+            })
+          );
+          const local=list(domain,company);
+          if (!direct || url.searchParams.get('tree')!=='1') return reply(await local);
+          const [own,linked]=await Promise.all([local,loadBranches(list)]);
+          return reply([...own,...linked].sort((left,right)=>right.createdAt-left.createdAt));
         }
         if (action==='sos' || action==='sos-atendido' || action==='sos-stream') {
           if (!sos) throw new HttpError(503,'Serviço de SOS indisponível.');

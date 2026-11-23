@@ -27,6 +27,11 @@ export function sosService(store,access) {
       const alerts=await store.pendingSos(company);
       return alerts.sort((left,right)=>right.createdAt-left.createdAt);
     },
+    history(company,since,until) {
+      if (!Number.isSafeInteger(since) || !Number.isSafeInteger(until) || since<=0 ||
+          until<=since || until-since>32*86400000) throw new HttpError(400,'Selecione um mês válido.');
+      return store.sosHistory(company,since,until);
+    },
     subscribe:store.watchSos,
     acknowledge(company,id,user) {
       return store.acknowledgeSos(company,sosId(id),user.uid);
