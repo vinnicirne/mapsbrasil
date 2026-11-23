@@ -79,7 +79,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await localResult.click();
   releaseLocal();
   await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
-  await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Finalizar rota'})).toBeVisible();
   const livePositions=()=>manager.evaluate(async()=>{
     const response=await fetch('/api/companies/piloto/tracking',{
       headers:{authorization:'Bearer '+sessionStorage.getItem('mapsbrasil-demo-session')}
@@ -103,8 +103,8 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await page.keyboard.press('Escape');
   await expect.poll(livePositions).toEqual([]);
   await locate(driver,origin);
-  await page.getByRole('button',{name:'Encerrar'}).click();
-  await expect(page.getByText('Navegação encerrada.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Finalizar rota'}).click();
+  await expect(page.getByText('Rota finalizada.',{exact:true})).toBeVisible();
   await expect(page.getByLabel('Para onde você vai?')).toHaveValue('');
   await openMenu.click();
   await expect(page.locator('#itinerary li')).toHaveCount(0);
@@ -139,7 +139,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
     const [r,g,b]=canvas.getContext('2d').getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1).data;
     return [r,g,b];
   })).toEqual([35,98,222]);
-  await expect(page.getByRole('button',{name:'Encerrar'})).toBeInViewport();
+  await expect(page.getByRole('button',{name:'Finalizar rota'})).toBeInViewport();
   await page.screenshot({path:test.info().outputPath('navegacao-offline.png')});
 
   const zone=pack.risks.features[0];
@@ -238,7 +238,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await result.click();
   expect(searches).toEqual(['Ave',fullAddress]);
   await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
-  await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Finalizar rota'})).toBeVisible();
   await driver.setOffline(true);
   await page.goto('/');
   await expect(page.locator('#itinerary')).toContainText('Avenida Paulista, 1578');
@@ -246,7 +246,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await openMenu.click();
   await page.getByRole('button',{name:'Iniciar navegação',exact:true}).click();
   await expect(page.locator('#travel-distance')).toContainText('Parada 1');
-  await page.getByRole('button',{name:'Encerrar'}).click();
+  await page.getByRole('button',{name:'Finalizar rota'}).click();
   await page.reload();
   await expect(field).toBeVisible();
   await expect(page.locator('#itinerary li')).toHaveCount(0);

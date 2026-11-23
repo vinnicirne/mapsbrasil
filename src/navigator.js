@@ -79,7 +79,7 @@ const outputTemplate=`
     <div class="map-controls" aria-label="Controles do mapa"><button id="zoom-in" type="button" aria-label="Aproximar">+</button><button id="zoom-out" type="button" aria-label="Afastar">−</button><button id="fit" type="button" aria-label="Centralizar mapa">◎</button></div>
     <div class="travel" id="travel" hidden>
       <div><strong id="travel-time"></strong><span id="travel-distance"></span></div>
-      <div class="travel-actions"><button id="mute" type="button" aria-pressed="false">Som ligado</button><button id="stop-nav" type="button">Encerrar</button></div>
+      <div class="travel-actions"><button id="mute" type="button" aria-pressed="false">Som ligado</button><button id="stop-nav" type="button">Finalizar rota</button></div>
     </div>
     <a class="attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
   </section>`;
@@ -652,7 +652,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   };
   $('calculate').onclick=calculate;
   $('start-nav').onclick=startNavigation;
-  $('stop-nav').onclick=()=>finishNavigation('Navegação encerrada.');
+  $('stop-nav').onclick=()=>finishNavigation('Rota finalizada.');
   $('mute').onclick=()=>{
     muted=!muted;
     $('mute').textContent=muted?'Som desligado':'Som ligado';

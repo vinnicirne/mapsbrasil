@@ -97,7 +97,7 @@ textarea { resize: vertical; min-height: 90px; }
 .travel span { font-size: .75rem; color: var(--muted); }
 .travel-actions { display: flex; gap: 4px; }
 .travel button { border: 1px solid #c7d7ce; background: white; color: var(--dark); border-radius: 8px; padding: 0 7px; font-size: .78rem; }
-#stop-nav { background: #fbebe8; color: #842e2d; border-color: #efc6c0; }
+#stop-nav { min-height: 44px; padding: 0 10px; background: #fbebe8; color: #842e2d; border-color: #efc6c0; font-weight: 750; white-space: nowrap; }
 .manager { width: min(100% - 28px, 920px); margin: 24px auto; }
 .manager-head p { margin-top: 5px; color: var(--muted); }
 .manager-tools,#invite-result,.requests { background: white; padding: 15px; border: 1px solid var(--line); border-radius: 13px; margin-top: 14px; }
