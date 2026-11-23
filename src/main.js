@@ -128,6 +128,7 @@ function renderNetwork() {
 function screen(name) {
   if (name!=='workspace') navigatorUI.setSosCompany();
   for (const id of ['welcome','workspace','management']) $(id).hidden=id!==name;
+  navigatorUI.setWorkspaceVisible(name==='workspace');
 }
 function accessScreen(title,copy,{login=false,join=false,verify=false,retry=false}={}) {
   screen('welcome');

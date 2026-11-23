@@ -95,6 +95,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   const menuButton=$('open-route-menu');
   let pack, packInfo, route, origin, position, bearing=0, progress=0, legIndex=0, completed=0;
   let navigationFix;
+  let workspaceVisible=false, homePosition, homeCamera, homeLookup=0;
   let watchId, wakeLock, lastVoice, muted=false, offRoute=0, rerouting=false, nav=false, selection='', selectedDestination;
   let monitor=riskMonitor();
   let worker, requestId=0;
@@ -173,6 +174,23 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     openMenu();
   };
   const map=createMap($('map'),onMapPoint);
+  async function setWorkspaceVisible(visible) {
+    if (visible===workspaceVisible) return;
+    workspaceVisible=visible;
+    const request=++homeLookup;
+    if (!visible) {
+      homePosition=homeCamera=undefined;
+      return;
+    }
+    const permission=await navigator.permissions?.query({name:'geolocation'}).catch(()=>undefined);
+    if (request!==homeLookup || permission?.state!=='granted') return;
+    navigator.geolocation?.getCurrentPosition(({coords})=>{
+      if (request!==homeLookup || coords.accuracy>1000) return;
+      homePosition=[coords.longitude,coords.latitude];
+      if (!demo) enableNationalMap();
+      redraw();
+    },()=>{}, {enableHighAccuracy:true,maximumAge:0,timeout:10000});
+  }
   function locateSearch() {
     if (Date.now()-searchPositionAt<30000 || !navigator.geolocation) return Promise.resolve(searchPosition);
     if (locating) return locating;
@@ -244,6 +262,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   function note(text) { $('nav-notice').textContent=text; }
   function nationalVisible() {
     return !!nationalMap?.ready() && connected && (operationalLayer() || route?.profile==='national' ||
+      (!demo && !!homePosition) ||
       (selectedSearchPoint && !inBounds(selectedSearchPoint,pack?.bounds ?? [0,0,0,0])));
   }
 
@@ -311,17 +330,27 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     $('map').hidden=useNational;
     $('map-empty').hidden=useNational || !!pack;
     $('offline-map-note').hidden=useNational || route?.profile!=='national';
-    const state={pack,route,legIndex,position,bearing,origin,destination:selectedSearchPoint ?? selectedDestination,nav,risks:riskFeatures()};
+    const currentPosition=position ?? homePosition;
+    const home=!nav && !route && !origin && !selection && !selectedSearchPoint && !selectedDestination;
+    const camera=useNational ? nationalMap : map;
+    const localPosition=pack && homePosition && inBounds(homePosition,pack.bounds);
+    const focusHome=home && homePosition && (useNational || localPosition) && homeCamera!==camera;
+    const state={pack,route,legIndex,position:currentPosition,bearing,origin,destination:selectedSearchPoint ?? selectedDestination,nav,risks:riskFeatures()};
     if (useNational) {
       if(changed) {
         nationalMap.resize();
         if(!nav && selectedSearchPoint) nationalMap.focus(selectedSearchPoint);
-        else if(!nav) nationalMap.overview(route);
+        else if(!nav && !focusHome) nationalMap.overview(route);
       }
       nationalMap.set(state);
     } else {
       map.set(state);
       if(changed && !nav && route?.profile==='national') map.fitRoute(route);
+    }
+    if (focusHome) {
+      homeCamera=camera;
+      if (useNational) nationalMap.focus(homePosition);
+      else map.follow(homePosition);
     }
   }
   const save=()=>persist({route,origin,legIndex,completed,stopsText:$('stops').value});
@@ -329,7 +358,8 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     connected=online;
     $('download').disabled=!online || !packInfo;
     $('download').textContent=hasStoredPack?'Atualizar região':'Baixar região';
-    if (operationalLayer()) {enableNationalMap();loadFactions();}
+    if (operationalLayer() || (!demo && homePosition)) enableNationalMap();
+    if (operationalLayer()) loadFactions();
     $('sample-action').hidden=!demo || pack?.riskMode!=='sample' || operationalLayer();
     legend();
     redraw();
@@ -357,7 +387,10 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     $('calculate').disabled=!pack;
     $('pick-origin').disabled=!pack;
     $('pick-stop').disabled=!pack;
-    if (pack) map.fit(pack);
+    if (pack) {
+      map.fit(pack);
+      if (homeCamera===map) homeCamera=undefined;
+    }
     if (route?.profile==='national') map.fitRoute(route);
     redraw();
   }
@@ -630,12 +663,14 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   }
 
   function finishNavigation(message) {
+    if (position) homePosition=position;
+    homeCamera=undefined;
     stopNavigation();
     resetTrip();
     itinerary();
     redraw();
-    if (nationalVisible()) nationalMap.overview();
-    else if (pack) map.fit(pack);
+    if (nationalVisible() && homeCamera!==nationalMap) nationalMap.overview();
+    else if (!nationalVisible() && pack && homeCamera!==map) map.fit(pack);
     $('destination-finder').querySelector('[role="status"]').textContent=message;
     tracker.refresh();
     void save().catch(reportError);
@@ -710,7 +745,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     },
     setTrackingCompany:tracker.setCompany,
     stopTracking:tracker.stop,
-    setPackInfo,setNetwork,
+    setPackInfo,setNetwork,setWorkspaceVisible,
     setDemo(value) {demo=value;},
     previewPack(value) { if(!hasStoredPack) setPack(value,false); },
     restore(snapshot) {
@@ -731,7 +766,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
       addressCache.clear();
       setPack(snapshot?.pack);
       itinerary();
-      if (!route && nationalVisible()) nationalMap.overview();
+      if (!route && !homePosition && nationalVisible()) nationalMap.overview();
       if (finished || legacyDemo) void save().catch(reportError);
     },
     changePack(value) {

@@ -9,6 +9,10 @@ const driverStop={point:destination,name:'Entrega de teste'};
 const router=makeRouter(pack);
 const leg=router(origin,[driverStop]).legs[0];
 const asPosition=([longitude,latitude])=>({longitude,latitude,accuracy:4});
+const mapCenterColor=page=>page.locator('#map').evaluate(canvas=>{
+  const [r,g,b]=canvas.getContext('2d').getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1).data;
+  return [r,g,b];
+});
 
 async function locate(context,coordinate) {
   await context.setGeolocation(asPosition(coordinate));
@@ -55,6 +59,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(page.getByRole('link',{name:'Voltar ao mapa'})).toBeVisible();
   await page.goto('/');
   await page.getByRole('button',{name:'Agora não'}).click();
+  await expect.poll(()=>mapCenterColor(page)).toEqual([33,96,212]);
   let releaseLocal;
   const nationalPending=new Promise(resolve=>{releaseLocal=resolve;});
   await page.route('**/api/companies/piloto/search',async route=>{
@@ -135,10 +140,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await page.getByRole('button',{name:'Iniciar navegação',exact:true}).click();
   await expect(page.locator('#turn-name')).toHaveText('Vire à esquerda');
   await expect(page.locator('#travel-time')).toContainText('min');
-  await expect.poll(()=>page.locator('#map').evaluate(canvas=>{
-    const [r,g,b]=canvas.getContext('2d').getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1).data;
-    return [r,g,b];
-  })).toEqual([35,98,222]);
+  await expect.poll(()=>mapCenterColor(page)).toEqual([35,98,222]);
   await expect(page.getByRole('button',{name:'Finalizar rota'})).toBeInViewport();
   await page.screenshot({path:test.info().outputPath('navegacao-offline.png')});
 
@@ -173,6 +175,11 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(page.getByText('Rota concluída.',{exact:true})).toBeVisible();
   await expect(page.locator('#itinerary li')).toHaveCount(0);
   expect(errors).toEqual([]);
+
+  await locate(driver,origin);
+  await page.reload();
+  await expect(page.getByLabel('Para onde você vai?')).toBeVisible();
+  await expect.poll(()=>mapCenterColor(page)).toEqual([33,96,212]);
 
   await driver.setOffline(false);
   await member.getByRole('button',{name:'Revogar'}).click();
@@ -392,6 +399,45 @@ test('frontend distingue API ausente de dispositivo offline e permite nova tenta
   await page.getByRole('button',{name:'Tentar novamente'}).click();
   await expect(page.getByRole('heading',{name:'Entre para navegar'})).toBeVisible();
   await expect(page.locator('#network')).toHaveText('Online');
+});
+
+test('mapa nacional abre perto do GPS autorizado, sem rota salva',async({browser,baseURL,request})=>{
+  const driverToken=(await (await request.post('/api/demo',{data:{role:'driver'}})).json()).token;
+  const adminToken=(await (await request.post('/api/demo',{data:{role:'admin'}})).json()).token;
+  const profile=await (await request.post('/api/join',{
+    headers:{authorization:'Bearer '+driverToken},data:{code:'rio-demo'}
+  })).json();
+  const approval=await request.post('/api/companies/piloto/decision',{
+    headers:{authorization:'Bearer '+adminToken},data:{uid:profile.user.uid,status:'approved'}
+  });
+  expect(approval.ok()).toBe(true);
+
+  const point=[-46.658,-23.558];
+  const context=await browser.newContext({baseURL,geolocation:asPosition(point),permissions:['geolocation']});
+  try {
+    const page=await context.newPage();
+    await page.route('**/api/companies/piloto/pack',async route=>{
+      const response=await route.fetch();
+      await route.fulfill({response,json:{...await response.json(),riskMode:'operational'}});
+    });
+    await page.route('https://tiles.openfreemap.org/styles/positron',route=>route.fulfill({
+      headers:{'access-control-allow-origin':'*'},json:{version:8,sources:{test:{type:'raster',tileSize:512,
+        tiles:['https://tiles.example.test/{z}/{x}/{y}.png']}},layers:[{id:'test',type:'raster',source:'test'}]}
+    }));
+    const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1sAAAAASUVORK5CYII=','base64');
+    await page.route('https://tiles.example.test/**',route=>route.fulfill({body:tile,contentType:'image/png',
+      headers:{'access-control-allow-origin':'*'}}));
+    const zoom=15;
+    const x=Math.floor((point[0]+180)/360*2**zoom);
+    const y=Math.floor((1-Math.asinh(Math.tan(point[1]*Math.PI/180))/Math.PI)/2*2**zoom);
+    const nearbyTile=page.waitForRequest(`https://tiles.example.test/${zoom}/${x}/${y}.png`);
+    await page.goto('/');
+    await page.getByRole('button',{name:'Entrar como motorista'}).click();
+    await page.getByRole('button',{name:'Agora não'}).click();
+    await expect(page.locator('#national-map')).toBeVisible();
+    await nearbyTile;
+    await expect(page.locator('#itinerary li')).toHaveCount(0);
+  } finally {await context.close();}
 });
 
 test('clicar em Entrar com e-mail envia o formulário para o Firebase Auth',async({page})=>{
