@@ -13,6 +13,7 @@ const formatDistance = value => value>=1000 ? (value/1000).toFixed(1).replace('.
 const outputTemplate=`
   <dialog class="route-panel" id="route-menu" aria-labelledby="route-menu-title">
     <div class="route-title"><h1 id="route-menu-title">Rotas</h1><button id="close-route-menu" class="icon-button close-menu" type="button" aria-label="Fechar menu de rotas" autofocus>×</button></div>
+    <a class="text-button" href="/?vinculo=1">Vincular outra empresa</a>
     <section class="pack-card">
       <div class="pack-top"><span class="download-icon" aria-hidden="true">⇩</span><div><h2>Mapa offline</h2><p id="pack-info">Selecione sua empresa para continuar.</p></div></div>
       <button class="secondary wide" id="download" type="button">Baixar região</button>

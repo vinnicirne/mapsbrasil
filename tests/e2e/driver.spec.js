@@ -30,9 +30,13 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   const manifest=await page.request.get('/manifest.webmanifest');
   expect((await manifest.json()).name).toBe('MapsBrasil Drive');
   await page.getByRole('button',{name:'Entrar como motorista'}).click();
+  await page.getByLabel('Código da empresa').fill('codigo-invalido');
+  await page.getByRole('button',{name:'Solicitar acesso'}).click();
+  await expect(page.locator('#join-feedback')).toHaveText('Código de adesão inválido.');
   await page.getByLabel('Código da empresa').fill('rio-demo');
   await page.getByRole('button',{name:'Solicitar acesso'}).click();
   await expect(page.getByRole('heading',{name:'Aguardando aprovação'})).toBeVisible();
+  await expect(page.locator('#join-feedback')).toHaveText('Solicitação enviada para Operação Rio do Ouro. Aguarde a aprovação da empresa.');
   await page.goto('/gestao');
   await expect(page.getByRole('heading',{name:'Acesso restrito'})).toBeVisible();
 
@@ -43,6 +47,11 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await member.getByRole('button',{name:'Aprovar',exact:true}).click();
   await expect(member).toContainText('Aprovado');
 
+  await page.goto('/?codigo=rio-demo');
+  await expect(page.getByLabel('Código da empresa')).toHaveValue('rio-demo');
+  await page.getByRole('button',{name:'Solicitar acesso'}).click();
+  await expect(page.locator('#join-feedback')).toHaveText('Seu acesso a Operação Rio do Ouro já está aprovado.');
+  await expect(page.getByRole('link',{name:'Voltar ao mapa'})).toBeVisible();
   await page.goto('/');
   let releaseLocal;
   const nationalPending=new Promise(resolve=>{releaseLocal=resolve;});

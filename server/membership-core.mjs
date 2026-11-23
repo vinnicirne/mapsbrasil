@@ -41,13 +41,14 @@ export function membershipService({store,companies,authenticate,privateKey}) {
     return (await store.list('company',id)).sort((a,b)=>b.requested-a.requested).map(publicRow);
   }
   async function request(user,code) {
-    const joinCode=String(code ?? '').trim();
+    const joinCode=String(code ?? '').replace(/[\u200B-\u200D\u2060\uFEFF]/g,'').trim();
     const company=companies.find(item=>item.joinCode===joinCode) ??
       (/^[\w-]{32}$/.test(joinCode)?await store.companyByCode?.(joinCode):undefined);
     if (!company) throw new HttpError(404,'Código de adesão inválido.');
     const now=Date.now();
     await store.request({company:company.id,uid:user.uid,email:user.email,status:'pending',requested:now,changed:now,decided_by:null});
-    return me(user);
+    const profile=await me(user);
+    return {...profile,requestedMembership:profile.memberships.find(row=>row.company===company.id)};
   }
   async function depart(user,company,uid,status) {
     await requireAdmin(user,company);

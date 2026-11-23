@@ -42,11 +42,13 @@ root.innerHTML=`
       <div id="join-group" hidden>
         <div id="memberships" class="memberships"></div>
         <form id="join-form">
-          <label for="code">Código da empresa</label><input id="code" name="code" maxlength="120" required autocomplete="off">
-          <button class="primary wide" type="submit">Solicitar acesso</button>
+          <label for="code">Código da empresa</label><input id="code" name="code" maxlength="120" required autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button class="primary wide" id="request-access" type="submit">Solicitar acesso</button>
+          <p id="join-feedback" class="join-feedback" role="status" aria-live="polite"></p>
         </form>
         <button class="secondary wide" id="accept-invite" type="button" hidden>Aceitar convite</button>
         <button class="text-button wide" id="refresh" type="button">Atualizar situação</button>
+        <a class="text-button wide" id="return-to-map" href="/" hidden>Voltar ao mapa</a>
       </div>
     </article>
   </main>
@@ -75,6 +77,7 @@ const $=id=>document.getElementById(id);
 const isManagement=location.pathname==='/gestao';
 const handoff=new URLSearchParams(location.search);
 const inviteToken=handoff.get('convite');
+const joiningCompany=handoff.has('codigo') || handoff.has('vinculo');
 if (handoff.has('codigo')) $('code').value=handoff.get('codigo');
 const statusLabels={pending:'Pendente',approved:'Aprovado',rejected:'Recusado',revoked:'Revogado'};
 let config,auth,profile,company,snapshot,info,serverReachable=false;
@@ -195,7 +198,7 @@ async function boot() {
   await refresh();
 }
 
-async function refresh() {
+async function refresh(updatedProfile) {
   const sequence=++refreshSequence;
   renderNetwork();
   if (!auth) return accessScreen('Login em preparação','A administração precisa configurar o provedor de identidade do piloto.');
@@ -204,7 +207,7 @@ async function refresh() {
     return accessScreen('Entre para navegar','Use seu e-mail verificado para acessar suas rotas e preparar o mapa offline.',{login:true});
   }
   try {
-    profile=await api('/me');
+    profile=updatedProfile ?? await api('/me');
   } catch (error) {
     if (error.status===401) {
       await auth.logout();
@@ -238,9 +241,10 @@ async function refresh() {
     const select=$('managed-company');
     fillSelect(select,profile.companies,select.value || profile.companies[0].id);
     await listMembers();
-  } else if (!approved.length || inviteToken) {
+  } else if (!approved.length || inviteToken || joiningCompany) {
     screen('welcome');
     renderMemberships();
+    $('return-to-map').hidden=!approved.length;
     accessScreen(profile.memberships.some(item=>item.status==='pending')?'Aguardando aprovação':'Solicite seu vínculo',
       'Informe o código recebido da empresa ou aceite o convite enviado ao seu e-mail.',{join:true});
   } else {
@@ -405,14 +409,38 @@ $('logout').onclick=run(async()=>{
   location.replace('/');
 });
 $('join-form').onsubmit=run(async()=>{
-  await api('/join',{method:'POST',body:{code:$('code').value}});
-  await refresh();
+  const button=$('request-access');
+  if (button.disabled) return;
+  const feedback=$('join-feedback');
+  button.disabled=true;
+  feedback.classList.remove('join-error');
+  feedback.textContent='Enviando solicitação…';
+  try {
+    const joined=await api('/join',{method:'POST',body:{code:$('code').value}});
+    const membership=joined.requestedMembership;
+    await refresh(joined);
+    if (membership?.status==='pending') feedback.textContent='Solicitação enviada para '+membership.name+'. Aguarde a aprovação da empresa.';
+    else if (membership?.status==='approved') feedback.textContent='Seu acesso a '+membership.name+' já está aprovado.';
+    else if (membership) feedback.textContent='Seu vínculo com '+membership.name+' está '+statusLabels[membership.status].toLowerCase()+'. Fale com o administrador da empresa.';
+    else feedback.textContent='Solicitação recebida. Confira a situação do vínculo acima.';
+  } catch (error) {
+    feedback.classList.add('join-error');
+    feedback.textContent=error.name==='TimeoutError' || error instanceof TypeError
+      ? 'A resposta demorou. Clique em Atualizar situação para conferir seu vínculo.'
+      : error.message;
+  } finally {
+    button.disabled=false;
+  }
 });
 $('accept-invite').onclick=run(async()=>{
   await api('/accept',{method:'POST',body:{token:inviteToken}});
   location.replace('/');
 });
-$('refresh').onclick=run(refresh);
+$('code').oninput=()=>{$('join-feedback').textContent='';};
+$('refresh').onclick=run(()=>{
+  $('join-feedback').textContent='';
+  return refresh();
+});
 $('retry-service').onclick=run(boot);
 $('refresh-list').onclick=run(listMembers);
 $('managed-company').onchange=run(async()=>{$('invite-result').hidden=true;await listMembers();});

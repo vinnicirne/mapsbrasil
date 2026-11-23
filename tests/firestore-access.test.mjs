@@ -142,7 +142,9 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
   const first=await (await call(newPath+'motoristas',{actor:'superadmin'})).json();
   assert.equal(first.members.length,0);
   assert.equal((await (await call(newPath+'motoristas',{actor:'superadmin'})).json()).joinCode,first.joinCode);
-  await call('join',{actor:'driver',body:{code:first.joinCode}});
+  const submitted=await call('join',{actor:'driver',body:{code:' '+first.joinCode.slice(0,12)+'\u200B'+first.joinCode.slice(12)+' '}});
+  assert.equal(submitted.status,200);
+  assert.equal((await submitted.json()).requestedMembership.status,'pending');
   assert.equal((await (await call(newPath+'motoristas',{actor:'superadmin'})).json()).members[0].status,'pending');
   const nextInvite=await (await call(newPath+'convite',{actor:'superadmin',body:{email:driver.email}})).json();
   assert.equal((await call('accept',{actor:'driver',body:nextInvite})).status,200);

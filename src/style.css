@@ -32,6 +32,9 @@ button { min-height: 42px; }
 .access-card h1 { letter-spacing: -.04em; font-size: clamp(1.65rem,5vw,2.25rem); line-height: 1.09; margin-bottom: 11px; }
 .access-card p { color: var(--muted); line-height: 1.45; }
 .access-card .wide, #join-form { margin-top: 12px; }
+.access-card .join-feedback:not(:empty) { margin-top: 9px; color: var(--dark); }
+.access-card .join-feedback.join-error { color: #842e2d; }
+#return-to-map { display: block; text-align: center; }
 .memberships { display: grid; gap: 6px; }
 .memberships p { font-size: .87rem; background: #eff4ee; border-radius: 8px; padding: 8px 10px; margin-top: 4px; }
 .demo-hint { font-size: .82rem; margin-top: 12px; }

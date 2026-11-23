@@ -99,14 +99,16 @@ export function openAccess(path, {demo, firebase, companies}) {
   }
 
   function request(user, code) {
-    const company=companies.find(item=>item.joinCode===String(code ?? '').trim());
+    const joinCode=String(code ?? '').replace(/[\u200B-\u200D\u2060\uFEFF]/g,'').trim();
+    const company=companies.find(item=>item.joinCode===joinCode);
     if (!company) throw new HttpError(404,'Código de adesão inválido.');
     const existing=membership.get(company.id,user.uid);
     if (!existing) {
       const now=Date.now();
       putMember.run(company.id,user.uid,user.email,'pending',now,now,null);
     }
-    return me(user);
+    const profile=me(user);
+    return {...profile,requestedMembership:profile.memberships.find(row=>row.company===company.id)};
   }
 
   function depart(user,company,uid,status) {
