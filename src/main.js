@@ -91,7 +91,8 @@ const report=message=>{
 let packLoad;
 const navigatorUI=makeNavigator($('navigation'),{download,prepareDestination,persist,reportError:report,
   searchNational:(query,near,signal)=>apiFor('search',{method:'POST',body:{query,near},signal}),
-  routeNational:(start,stops)=>apiFor('route',{method:'POST',body:{start,stops}})});
+  routeNational:(start,stops)=>apiFor('route',{method:'POST',body:{start,stops}}),
+  sendTracking:(id,body)=>api('/companies/'+encodeURIComponent(id)+'/tracking',{method:'POST',body})});
 $('route-menu-title').parentElement.after($('company').closest('.company-bar'));
 
 async function api(path,{method='GET',body,raw=false,signal}={}) {
@@ -158,6 +159,7 @@ async function clearLocal() {
 function showSnapshot() {
   screen('workspace');
   company=snapshot.company;
+  navigatorUI.setTrackingCompany(config?.tracking?company:undefined);
   fillSelect($('company'),[{id:company,name:snapshot.companyName}],company);
   $('sample-label').hidden=snapshot.pack.riskMode!=='sample';
   navigatorUI.restore(snapshot);
@@ -210,12 +212,14 @@ async function refresh(updatedProfile) {
     profile=updatedProfile ?? await api('/me');
   } catch (error) {
     if (error.status===401) {
+      navigatorUI.setTrackingCompany();
       await auth.logout();
       if (snapshot) await clearLocal();
       accessScreen('Entre novamente',error.message,{login:true});
       return;
     }
     if (error.status===403) {
+      navigatorUI.setTrackingCompany();
       if (snapshot) await clearLocal();
       $('logout').hidden=false;
       accessScreen('E-mail pendente de verificação',error.message,{verify:!config?.demo});
@@ -242,6 +246,7 @@ async function refresh(updatedProfile) {
     fillSelect(select,profile.companies,select.value || profile.companies[0].id);
     await listMembers();
   } else if (!approved.length || inviteToken || joiningCompany) {
+    navigatorUI.setTrackingCompany();
     screen('welcome');
     renderMemberships();
     $('return-to-map').hidden=!approved.length;
@@ -257,6 +262,7 @@ async function refresh(updatedProfile) {
 }
 
 async function chooseCompany(id) {
+  navigatorUI.setTrackingCompany(config?.tracking?id:undefined,profile.memberships.find(member=>member.company===id)?.driverName);
   if (company!==id) {
     company=id;
     info=undefined;
@@ -399,6 +405,7 @@ $('verify-email').onclick=run(async()=>{
 $('logout').onclick=run(async()=>{
   refreshSequence++;
   localStorage.setItem('mapsbrasil-signout','1');
+  await navigatorUI.stopTracking();
   await clearLocal();
   if (auth) {
     await auth.logout();

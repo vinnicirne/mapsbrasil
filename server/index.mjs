@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import {nationalNavigation} from './national-navigation.mjs';
+import {trackingService} from './tracking.mjs';
 import { demoCompanies, hash, HttpError, openAccess } from './access.mjs';
 
 const host=process.env.HOST ?? '127.0.0.1';
@@ -32,6 +33,21 @@ const national=nationalNavigation({limit:async kind=>{
 const dbDir=resolve(process.env.DATA_DIR ?? (demo?'data/demo':'data'));
 await mkdir(dbDir,{recursive:true});
 const access=openAccess(resolve(dbDir,'mapsbrasil.sqlite'),{demo,firebase,companies});
+const demoPositions=new Map();
+const demoTracking=demo?trackingService({
+  updateTracking(company,uid,value) {demoPositions.set(company+'/'+uid,{...value,company,uid});},
+  stopTracking(company,uid,session) {
+    const key=company+'/'+uid;
+    if (demoPositions.get(key)?.session===session) demoPositions.delete(key);
+  },
+  liveTracking(company,since) {return [...demoPositions.values()].filter(row=>row.company===company && row.updatedAt>=since);},
+  get(company,uid) {
+    try {
+      access.requireApproved({uid},company);
+      return {status:'approved'};
+    } catch {return null;}
+  }
+},access):undefined;
 const packFile=process.env.PILOT_PACK_PATH ?? (demo || process.env.ALLOW_SAMPLE_PACK==='1'?'dist/packs/rio-do-ouro.json':null);
 const packFileBytes=packFile ? await readFile(packFile) : null;
 const pack=packFileBytes ? JSON.parse(packFileBytes) : null;
@@ -66,7 +82,7 @@ async function handle(request,response) {
   const url=new URL(request.url,'http://localhost');
   const pathname=url.pathname;
   const method=request.method;
-  if (pathname==='/api/config' && method==='GET') return json(response,{firebase:demo?null:firebase,demo,
+  if (pathname==='/api/config' && method==='GET') return json(response,{firebase:demo?null:firebase,demo,tracking:demo,
     signup:demo?'rio-demo':null});
   if (pathname==='/api/demo' && method==='POST') return json(response,access.demoToken((await body(request)).role));
   if (pathname.startsWith('/api/')) {
@@ -74,9 +90,14 @@ async function handle(request,response) {
     if (pathname==='/api/me' && method==='GET') return json(response,access.me(user));
     if (pathname==='/api/join' && method==='POST') return json(response,access.request(user,(await body(request)).code));
     if (pathname==='/api/accept' && method==='POST') return json(response,access.acceptInvite(user,(await body(request)).token));
-    const companyRoute=/^\/api\/companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route)$/.exec(pathname);
+    const companyRoute=/^\/api\/companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route|tracking)$/.exec(pathname);
     if (!companyRoute) throw new HttpError(404,'Recurso não encontrado.');
     const [,company,action]=companyRoute;
+    if (action==='tracking' && method==='POST' && demoTracking) return json(response,await demoTracking.update(user,company,await body(request)));
+    if (action==='tracking' && method==='GET' && demoTracking) {
+      access.members(user,company);
+      return json(response,await demoTracking.live(company));
+    }
     if (action==='members' && method==='GET') return json(response,access.members(user,company));
     if (action==='decision' && method==='POST') {
       const {uid,status}=await body(request);

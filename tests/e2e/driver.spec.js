@@ -15,6 +15,7 @@ async function locate(context,coordinate) {
 }
 
 test('autocadastro, aprovação por empresa e navegação offline com manobras, recálculo e chegada',async({browser,baseURL})=>{
+  test.setTimeout(65000);
   const driver=await browser.newContext({baseURL,viewport:{width:390,height:844},isMobile:true,hasTouch:true,
     geolocation:asPosition(origin),permissions:['geolocation']});
   const company=await browser.newContext({baseURL});
@@ -78,6 +79,27 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   releaseLocal();
   await page.getByRole('button',{name:'Iniciar navegação até o destino'}).click();
   await expect(page.getByRole('button',{name:'Encerrar'})).toBeVisible();
+  const livePositions=()=>manager.evaluate(async()=>{
+    const response=await fetch('/api/companies/piloto/tracking',{
+      headers:{authorization:'Bearer '+sessionStorage.getItem('mapsbrasil-demo-session')}
+    });
+    return response.json();
+  });
+  expect(await livePositions()).toEqual([]);
+  await page.getByRole('button',{name:'Compartilhar GPS'}).click();
+  await page.getByLabel('Seu nome').fill('Motorista de teste');
+  await page.getByRole('button',{name:'Compartilhar localização'}).click();
+  await expect.poll(async()=>(await livePositions())[0]?.name).toBe('Motorista de teste');
+  const firstLocation=(await livePositions())[0];
+  expect(firstLocation.position).toEqual(origin);
+  expect(firstLocation.route.length).toBeGreaterThanOrEqual(4);
+  const nextPoint=[origin[0]+0.00001,origin[1]];
+  await locate(driver,nextPoint);
+  await expect.poll(async()=>(await livePositions())[0]?.position,{timeout:20000}).toEqual(nextPoint);
+  await page.keyboard.press('Escape');
+  await page.locator('#tracking-stop').click();
+  await expect.poll(livePositions).toEqual([]);
+  await locate(driver,origin);
   await page.getByRole('button',{name:'Encerrar'}).click();
   await openMenu.click();
   await expect(page.getByRole('button',{name:'Atualizar região'})).toBeVisible();

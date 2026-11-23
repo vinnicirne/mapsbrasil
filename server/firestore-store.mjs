@@ -9,8 +9,32 @@ export function firestoreStore(database, namespace) {
   const grants=base.collection('memberships');
   const invites=base.collection('invites');
   const companies=base.collection('companies');
+  const positions=company=>base.collection('tracking').doc(company).collection('positions');
   const member=(company,uid)=>grants.doc(hash(JSON.stringify([company,uid])));
   return {
+    async updateTracking(company,uid,update) {
+      const ref=positions(company).doc(hash(uid));
+      await database.runTransaction(async tx=>{
+        const current=(await tx.get(ref)).data();
+        if (current?.observedAt>update.observedAt || (current?.session===update.session && current.ended)) return;
+        const membership=member(company,uid);
+        const row=(await tx.get(membership)).data();
+        if (row?.status!=='approved') throw new HttpError(403,'Seu vínculo ainda não foi aprovado.');
+        tx.set(ref,{...update,uid});
+        if (!row.driverName) tx.update(membership,{driverName:update.name});
+      });
+    },
+    async stopTracking(company,uid,session) {
+      const ref=positions(company).doc(hash(uid));
+      await database.runTransaction(async tx=>{
+        const current=(await tx.get(ref)).data();
+        if (!current || current.session===session) tx.set(ref,{session,ended:true,updatedAt:0,expiresAt:new Date(Date.now()+90000)});
+      });
+    },
+    async liveTracking(company,since) {
+      const result=await positions(company).where('updatedAt','>=',since).get();
+      return result.docs.map(doc=>doc.data());
+    },
     async getCompany(id) {return (await companies.doc(id).get()).data();},
     async companyByCode(code) {
       const result=await companies.where('joinCode','==',code).limit(1).get();
@@ -61,7 +85,7 @@ export function firestoreStore(database, namespace) {
         const grant=await inspect((await tx.get(ref)).data());
         const membership=member(grant.company,uid);
         const prev=(await tx.get(membership)).data();
-        tx.set(membership,{...grant,requested:prev?.requested ?? grant.requested});
+        tx.set(membership,{...prev,...grant,requested:prev?.requested ?? grant.requested});
         tx.update(ref,{used:grant.changed});
       });
     }

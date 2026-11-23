@@ -5,6 +5,7 @@ import {membershipService,HttpError,hash} from '../server/membership-core.mjs';
 import {createDriveHandler} from '../server/firestore-api.mjs';
 import {corporateManagement} from '../server/corporate-management.mjs';
 import {driverRegistration} from '../server/driver-registration.mjs';
+import {trackingService} from '../server/tracking.mjs';
 
 const company={id:'empresa',name:'Empresa de teste',joinCode:'teste',adminUids:['admin']};
 const admin={uid:'admin',email:'admin@example.test'};
@@ -17,7 +18,7 @@ const auth=async header=>{
 const {privateKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1',privateKeyEncoding:{format:'pem',type:'pkcs8'},publicKeyEncoding:{format:'jwk'}});
 
 function memory() {
-  const members=new Map(),invites=new Map(),companies=new Map();
+  const members=new Map(),invites=new Map(),companies=new Map(),positions=new Map();
   const key=(c,u)=>c+'/'+u;
   return {
     getCompany:id=>companies.get(id),
@@ -28,6 +29,12 @@ function memory() {
       return companies.get(id);
     },
     get:(c,u)=>members.get(key(c,u)),
+    updateTracking(c,u,value) {positions.set(key(c,u),{...value,company:c,uid:u});},
+    stopTracking(c,u,session) {
+      const id=key(c,u);
+      if(positions.get(id)?.session===session) positions.delete(id);
+    },
+    liveTracking:(c,since)=>[...positions.values()].filter(row=>row.company===c && row.updatedAt>=since),
     list:(field,value)=>[...members.values()].filter(row=>row[field]===value),
     request(row) { const id=key(row.company,row.uid); if (!members.has(id)) members.set(id,row); },
     decide(c,u,change) {
@@ -39,7 +46,8 @@ function memory() {
     async consumeInvite(id,u,inspect) {
       const row=invites.get(id);
       const grant=await inspect(row);
-      members.set(key(grant.company,u),grant);
+      const memberId=key(grant.company,u);
+      members.set(memberId,{...members.get(memberId),...grant});
       row.used=Date.now();
     }
   };
@@ -112,7 +120,7 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
     return Response.json({fields:{active:{booleanValue:active}}});
   });
   const access=membershipService({store,companies,authenticate:auth,privateKey});
-  const handler=createDriveHandler({access,corporate,registerDriver:driverRegistration('fixture')});
+  const handler=createDriveHandler({access,corporate,registerDriver:driverRegistration('fixture'),tracking:trackingService(store,access)});
   const call=(path,{actor='gestor',source=origin,body,method=body?'POST':'GET'}={})=>handler(new Request('https://drive.example/api/'+path,{
     method,headers:{origin:source,authorization:'Bearer '+actor},body:body && JSON.stringify(body)
   }));
@@ -131,8 +139,29 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
   active=true;
   await call('join',{actor:'driver',body:{code:'teste'}});
   assert.equal((await (await call(path+'motoristas')).json()).members[0].status,'pending');
+  const location={session:'12345678-abcd-1234-abcd-123456789abc',name:'Motorista de teste',position:[-43,-22],
+    route:[-43,-22,-43.01,-22.01],accuracy:4,observedAt:Date.now()};
+  const sendLocation=(body,companyId='empresa')=>call('companies/'+companyId+'/tracking',{actor:'driver',body});
+  assert.equal((await sendLocation(location)).status,403);
   assert.equal((await (await call(path+'decisao',{body:{uid:'driver',status:'approved',company:'outra'}})).json()).members[0].status,'approved');
+  assert.equal((await sendLocation(location,'outra')).status,403);
+  assert.equal((await sendLocation({...location,position:[999,0]})).status,400);
+  assert.equal((await sendLocation(location)).status,200);
+  const contact={uid:'driver',name:'Nome cadastrado pela empresa',phone:'(21) 99999-9999'};
+  assert.equal((await call(path+'perfil',{actor:'comum',body:contact})).status,403);
+  assert.equal((await call(path+'perfil',{body:{...contact,phone:'telefone inválido'}})).status,400);
+  assert.equal((await call(path+'perfil',{body:contact})).status,200);
+  assert.equal((await call(path+'localizacoes',{actor:'comum'})).status,403);
+  const [live]=await (await call(path+'localizacoes')).json();
+  assert.equal(live.name,contact.name);
+  assert.equal(live.phone,'+5521999999999');
+  assert.deepEqual(live.route,location.route);
+  assert.deepEqual(await (await call('empresa/outra.example/localizacoes',{actor:'superadmin'})).json(),[]);
+  assert.equal((await sendLocation({session:location.session,stop:true})).status,200);
+  assert.deepEqual(await (await call(path+'localizacoes')).json(),[]);
+  await sendLocation({...location,observedAt:Date.now()});
   assert.equal((await (await call(path+'decisao',{body:{uid:'driver',status:'revoked'}})).json()).members[0].status,'revoked');
+  assert.deepEqual(await (await call(path+'localizacoes')).json(),[]);
   const {token}=await (await call(path+'convite',{body:{email:driver.email}})).json();
   assert.equal((await call('accept',{actor:'admin',body:{token}})).status,403);
   assert.equal((await call('accept',{actor:'driver',body:{token}})).status,200);
@@ -149,7 +178,7 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
   const nextInvite=await (await call(newPath+'convite',{actor:'superadmin',body:{email:driver.email}})).json();
   assert.equal((await call('accept',{actor:'driver',body:nextInvite})).status,200);
   assert.equal((await call('companies/corp_'+hash('nova.example')+'/pack',{actor:'driver'})).status,200);
-  const body={email:'novo@example.test',password:'SenhaInicial123!'};
+  const body={email:'novo@example.test',password:'SenhaInicial123!',name:'Motorista novo',phone:'+55 21 98888-2222'};
   assert.equal((await call(newPath+'cadastro',{body})).status,403);
   assert.equal(registrations,0);
   const registered=await call(newPath+'cadastro',{actor:'superadmin',body});
@@ -157,6 +186,8 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
   assert.deepEqual(await registered.json(),{email:body.email,verificationSent:true,linked:true});
   const row=store.get('corp_'+hash('nova.example'),'novo');
   assert.equal(row.status,'approved');
+  assert.equal(row.driverName,body.name);
+  assert.equal(row.driverPhone,'+5521988882222');
   assert.equal(row.password,undefined);
   assert.equal((await call(newPath+'cadastro',{actor:'superadmin',body:{...body,email:driver.email}})).status,409);
 });

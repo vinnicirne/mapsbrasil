@@ -4,6 +4,7 @@ import {distance,findZone,heading,inBounds,riskMonitor,routeCrossesZone} from '.
 import {projectProgress} from './navigation/router.js';
 import {createDestinationIndex} from './navigation/destinations.js';
 import {createDestinationFinder} from './destination-finder.js';
+import {createTrackingControl,routeCoordinates} from './tracking.js';
 import {areaName,factionColors} from './navigation/factions.js';
 
 const arrows={left:'↰',right:'↱',straight:'↑',uturn:'↶',arrive:'●'};
@@ -14,6 +15,14 @@ const outputTemplate=`
   <dialog class="route-panel" id="route-menu" aria-labelledby="route-menu-title">
     <div class="route-title"><h1 id="route-menu-title">Rotas</h1><button id="close-route-menu" class="icon-button close-menu" type="button" aria-label="Fechar menu de rotas" autofocus>×</button></div>
     <a class="text-button" href="/?vinculo=1">Vincular outra empresa</a>
+    <form class="fleet-sharing" id="tracking-form" aria-labelledby="tracking-title" hidden>
+      <h2 id="tracking-title">Compartilhar com a empresa</h2>
+      <p>Compartilha sua posição e a rota em navegação enquanto o Drive está aberto e conectado.</p>
+      <label for="tracking-name">Seu nome</label>
+      <input id="tracking-name" required maxlength="100" autocomplete="name">
+      <button class="secondary wide" type="submit">Compartilhar localização</button>
+      <p role="status"></p>
+    </form>
     <section class="pack-card">
       <div class="pack-top"><span class="download-icon" aria-hidden="true">⇩</span><div><h2>Mapa offline</h2><p id="pack-info">Selecione sua empresa para continuar.</p></div></div>
       <button class="secondary wide" id="download" type="button">Baixar região</button>
@@ -55,6 +64,7 @@ const outputTemplate=`
       <div><span id="turn-distance"></span><h2 id="turn-name">Obtendo GPS</h2><p id="turn-road"></p></div>
     </div>
     <p class="risk-banner" id="risk" role="alert" hidden></p>
+    <button class="secondary fleet-badge" id="tracking-stop" type="button" hidden></button>
     <div class="map-controls" aria-label="Controles do mapa"><button id="zoom-in" type="button" aria-label="Aproximar">+</button><button id="zoom-out" type="button" aria-label="Afastar">−</button><button id="fit" type="button" aria-label="Centralizar mapa">◎</button></div>
     <div class="travel" id="travel" hidden>
       <div><strong id="travel-time"></strong><span id="travel-distance"></span></div>
@@ -63,12 +73,13 @@ const outputTemplate=`
     <a class="attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
   </section>`;
 
-export function makeNavigator(container, {download, prepareDestination, searchNational, routeNational, persist, reportError}) {
+export function makeNavigator(container, {download, prepareDestination, searchNational, routeNational, persist, reportError, sendTracking}) {
   container.innerHTML=outputTemplate;
   const $=id=>container.querySelector('#'+id);
   const menu=$('route-menu');
   const menuButton=$('open-route-menu');
   let pack, packInfo, route, origin, position, bearing=0, progress=0, legIndex=0, completed=0;
+  let navigationFix;
   let watchId, wakeLock, lastVoice, muted=false, offRoute=0, rerouting=false, nav=false, selection='', selectedDestination;
   let monitor=riskMonitor();
   let worker, requestId=0;
@@ -77,6 +88,12 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   let searchPosition, searchPositionAt=0, locating;
   const audio=new Audio();
   let hasStoredPack=false,connected=false,nationalMap,nationalLoading,findLocal,factions,alertFactions,factionLoad,selectedSearchPoint,lastReroute=0,planning=false;
+  const tracker=createTrackingControl({
+    form:$('tracking-form'),button:$('tracking-stop'),send:sendTracking,
+    route:()=>nav?routeCoordinates(route,legIndex):[],
+    latestFix:()=>nav?navigationFix:undefined,
+    openSettings:()=>{endPointSelection();openMenu();}
+  });
   function openMenu() {
     menu.showModal();
     menuButton.setAttribute('aria-expanded','true');
@@ -339,8 +356,10 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     if (useSaved && origin) return Promise.resolve(origin);
     if (!navigator.geolocation) return Promise.reject(Error('GPS indisponível neste navegador.'));
     return new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(
-      ({coords})=>{
+      fix=>{
+        const {coords}=fix;
         if (coords.accuracy>100) return reject(Error('GPS impreciso. Marque a origem no mapa.'));
+        navigationFix=fix;
         position=[coords.longitude,coords.latitude];resolve(position);
       },
       ()=>reject(Error('GPS indisponível. Marque a origem no mapa.')),
@@ -464,8 +483,9 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     } finally {rerouting=false;}
   }
 
-  function gps({coords}) {
+  function gps(fix) {
     if (!nav || document.hidden || !route) return;
+    const {coords}=fix;
     const raw=[coords.longitude,coords.latitude];
     if (coords.accuracy>65) {
       $('turn-name').textContent='GPS impreciso';
@@ -473,6 +493,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
       updateRisk(raw,coords.accuracy);
       return;
     }
+    navigationFix=fix;
     const previous=position;
     position=raw;
     if (Number.isFinite(coords.heading) && (coords.speed ?? 0)>1) bearing=coords.heading;
@@ -550,6 +571,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
       $('turn-name').textContent='GPS indisponível';
       $('turn-road').textContent='Confira a permissão de localização.';
     },{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+    tracker.refresh();
     redraw();
   }
 
@@ -559,6 +581,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     void wakeLock?.release().catch(()=>{});
     wakeLock=undefined;
     nav=false;
+    tracker.refresh();
     window.speechSynthesis?.cancel();
     audio.pause();
     container.classList.remove('navigating');
@@ -620,13 +643,15 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   };
   return {
     active:()=>nav,
+    setTrackingCompany:tracker.setCompany,
+    stopTracking:tracker.stop,
     setPackInfo,setNetwork,
     previewPack(value) { if(!hasStoredPack) setPack(value,false); },
     restore(snapshot) {
       if (menu.open) menu.close();
       endPointSelection();
       stopNavigation();
-      route=snapshot?.route;origin=snapshot?.origin;position=undefined;selectedDestination=undefined;
+      route=snapshot?.route;origin=snapshot?.origin;position=undefined;navigationFix=undefined;selectedDestination=undefined;
       finder.reset();
       addressCache.clear();
       legIndex=snapshot?.legIndex ?? 0;completed=snapshot?.completed ?? 0;progress=0;

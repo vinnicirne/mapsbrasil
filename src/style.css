@@ -63,6 +63,11 @@ textarea { resize: vertical; min-height: 90px; }
 .pack-top { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
 .download-icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; background: #dce9de; border-radius: 9px; font-size: 1.2rem; }
 .pack-card h2,.plan h2 { font-size: 1.02rem; }
+.fleet-sharing { margin: 12px 0; border: 1px solid var(--line); border-radius: 12px; padding: 11px; }
+.fleet-sharing h2 { font-size: .95rem; }
+.fleet-sharing p { font-size: .8rem; color: var(--muted); margin: 6px 0; }
+.fleet-sharing button { margin-top: 7px; }
+.fleet-badge { position: absolute; z-index: 2; bottom: calc(var(--map-bottom) + 148px); right: 12px; font-size: .75rem; box-shadow: var(--shadow); }
 .plan { margin-top: 17px; }
 .plan > .primary { margin-top: 8px; }
 #start-nav { background: var(--dark); color: white; border-color: var(--dark); }

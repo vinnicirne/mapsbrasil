@@ -79,6 +79,8 @@ A aba **Motoristas** usa a sessão do Painel Empresa. A API valida o token e con
 
 O backend local conserva o SQLite para demonstração independente. Para uma hospedagem separada, a ponte na Vercel também aceita `MAPSBRASIL_API_ORIGIN` quando `FIRESTORE_PROJECT_ID` estiver ausente.
 
+O mapa da aba **Motoristas** consulta localizações a cada 10 segundos enquanto está visível. O motorista inicia e encerra o compartilhamento no menu **Rotas**. O Drive envia a posição e o traçado da navegação a cada 15 segundos com o aplicativo visível e conectado. O painel deixa de exibir a posição após 65 segundos sem atualização. O servidor mantém apenas a posição e rota mais recentes de cada motorista. Configure no Firestore do Drive a política TTL para o campo `expiresAt` do grupo de coleções `positions` para excluir os documentos expirados.
+
 ## Gerar um pacote regional
 
 Forneça um extrato OSM JSON e o arquivo GeoJSON de risco autorizado. O extrato incluído corresponde à caixa de Rio do Ouro indicada no script. Para outra área, defina PACK_BOUNDS na ordem oeste,sul,leste,norte e PACK_REGION com o nome da região. Use fontes licenciadas para expansão e preserve a atribuição [OpenStreetMap contributors](https://www.openstreetmap.org/copyright).
