@@ -3,6 +3,7 @@ import { mkdir, readFile, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import {nationalNavigation} from './national-navigation.mjs';
 import {trackingService} from './tracking.mjs';
+import {sosService} from './sos.mjs';
 import { demoCompanies, hash, HttpError, openAccess } from './access.mjs';
 
 const host=process.env.HOST ?? '127.0.0.1';
@@ -33,6 +34,19 @@ const national=nationalNavigation({limit:async kind=>{
 const dbDir=resolve(process.env.DATA_DIR ?? (demo?'data/demo':'data'));
 await mkdir(dbDir,{recursive:true});
 const access=openAccess(resolve(dbDir,'mapsbrasil.sqlite'),{demo,firebase,companies});
+const demoAlerts=new Map();
+const demoSos=demo?sosService({
+  createSos(company,user,alert) {
+    const key=company+'/'+alert.id;
+    const existing=demoAlerts.get(key);
+    if (existing && existing.uid!==user.uid) throw new HttpError(409,'Identificador de SOS em uso.');
+    if (!existing) demoAlerts.set(key,{...alert,company,uid:user.uid,driverName:user.email});
+    return {id:alert.id,createdAt:existing?.createdAt ?? alert.createdAt};
+  },
+  pendingSos(company) {
+    return [...demoAlerts.values()].filter(alert=>alert.company===company && !alert.acknowledgedAt);
+  }
+},access):undefined;
 const demoPositions=new Map();
 const demoTracking=demo?trackingService({
   updateTracking(company,uid,value) {demoPositions.set(company+'/'+uid,{...value,company,uid});},
@@ -82,7 +96,7 @@ async function handle(request,response) {
   const url=new URL(request.url,'http://localhost');
   const pathname=url.pathname;
   const method=request.method;
-  if (pathname==='/api/config' && method==='GET') return json(response,{firebase:demo?null:firebase,demo,tracking:demo,
+  if (pathname==='/api/config' && method==='GET') return json(response,{firebase:demo?null:firebase,demo,tracking:demo,sos:demo,
     signup:demo?'rio-demo':null});
   if (pathname==='/api/demo' && method==='POST') return json(response,access.demoToken((await body(request)).role));
   if (pathname.startsWith('/api/')) {
@@ -90,9 +104,14 @@ async function handle(request,response) {
     if (pathname==='/api/me' && method==='GET') return json(response,access.me(user));
     if (pathname==='/api/join' && method==='POST') return json(response,access.request(user,(await body(request)).code));
     if (pathname==='/api/accept' && method==='POST') return json(response,access.acceptInvite(user,(await body(request)).token));
-    const companyRoute=/^\/api\/companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route|tracking)$/.exec(pathname);
+    const companyRoute=/^\/api\/companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route|tracking|sos)$/.exec(pathname);
     if (!companyRoute) throw new HttpError(404,'Recurso não encontrado.');
     const [,company,action]=companyRoute;
+    if (action==='sos' && method==='POST' && demoSos) return json(response,await demoSos.send(user,company,await body(request)),201);
+    if (action==='sos' && method==='GET' && demoSos) {
+      access.members(user,company);
+      return json(response,await demoSos.pending(company));
+    }
     if (action==='tracking' && method==='POST' && demoTracking) return json(response,await demoTracking.update(user,company,await body(request)));
     if (action==='tracking' && method==='GET' && demoTracking) {
       access.members(user,company);

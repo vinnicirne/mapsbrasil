@@ -76,6 +76,10 @@ const outputTemplate=`
     </div>
     <p class="risk-banner" id="risk" role="alert" hidden></p>
 
+    <div id="sos-action" class="sos-action" hidden>
+      <p id="sos-status" role="status" aria-live="polite"></p>
+      <button type="button" id="send-sos" aria-label="SOS — enviar pedido de socorro">SOS</button>
+    </div>
     <div class="map-controls" aria-label="Controles do mapa"><button id="zoom-in" type="button" aria-label="Aproximar">+</button><button id="zoom-out" type="button" aria-label="Afastar">−</button><button id="fit" type="button" aria-label="Centralizar mapa">◎</button></div>
     <div class="travel" id="travel" hidden>
       <div><strong id="travel-time"></strong><span id="travel-distance"></span></div>
@@ -84,7 +88,7 @@ const outputTemplate=`
     <a class="attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
   </section>`;
 
-export function makeNavigator(container, {download, prepareDestination, searchNational, routeNational, persist, reportError, sendTracking}) {
+export function makeNavigator(container, {download, prepareDestination, searchNational, routeNational, persist, reportError, sendTracking, sendSos}) {
   container.innerHTML=outputTemplate;
   const $=id=>container.querySelector('#'+id);
   const menu=$('route-menu');
@@ -105,6 +109,35 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     latestFix:()=>nav?navigationFix:undefined,
     beforePrompt:()=>{endPointSelection();if(menu.open) menu.close();}
   });
+  let sosCompany;
+  const sosButton=$('send-sos');
+  const sosStatus=$('sos-status');
+  sosButton.onclick=async()=>{
+    const context=sosCompany;
+    if (!context || sosButton.disabled) return;
+    if (!navigator.onLine) {
+      sosStatus.textContent='Sem internet. O SOS ainda não foi enviado.';
+      return;
+    }
+    const id=context.pendingId ??= crypto.randomUUID();
+    const fixes=[navigationFix,tracker.lastFix()].filter(Boolean);
+    const fix=fixes.sort((a,b)=>b.timestamp-a.timestamp)[0];
+    const location=fix && Date.now()-fix.timestamp<=120000 ? {
+      position:[fix.coords.longitude,fix.coords.latitude],observedAt:Math.round(fix.timestamp)
+    } : null;
+    sosButton.disabled=true;
+    sosStatus.textContent='Enviando SOS…';
+    try {
+      const receipt=await sendSos(context.id,{id,location});
+      if (receipt.id!==id) throw Error('Resposta de SOS inválida.');
+      context.pendingId=undefined;
+      if (sosCompany===context) sosStatus.textContent='SOS registrado no painel da empresa.';
+    } catch {
+      if (sosCompany===context) sosStatus.textContent='Envio não confirmado. Toque em SOS para tentar novamente.';
+    } finally {
+      if (sosCompany===context) sosButton.disabled=false;
+    }
+  };
   function openMenu() {
     menu.showModal();
     menuButton.setAttribute('aria-expanded','true');
@@ -668,6 +701,13 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   };
   return {
     active:()=>nav,
+    setSosCompany(context) {
+      if (context?.id===sosCompany?.id && context?.uid===sosCompany?.uid) return;
+      sosCompany=context;
+      sosButton.disabled=false;
+      sosStatus.textContent='';
+      $('sos-action').hidden=!context;
+    },
     setTrackingCompany:tracker.setCompany,
     stopTracking:tracker.stop,
     setPackInfo,setNetwork,

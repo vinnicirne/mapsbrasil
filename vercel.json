@@ -20,6 +20,7 @@
   ],
   "functions": {
     "api/bridge.mjs": {
+      "maxDuration": 40,
       "includeFiles": "{public/packs/rio-do-ouro.json,server/packs/rio-do-ouro-faccoes.json}"
     }
   }

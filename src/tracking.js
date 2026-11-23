@@ -203,6 +203,7 @@ export function createTrackingControl({dialog,status,button,settings,send,route,
   document.addEventListener('visibilitychange',resume);
   return {
     stop,refresh,
+    lastFix:()=>active?.fix,
     setCompany(context) {
       const key=context && 'mapsbrasil-gps-v1:'+encodeURIComponent(context.uid)+':'+encodeURIComponent(context.id);
       if (scope?.key===key) return;

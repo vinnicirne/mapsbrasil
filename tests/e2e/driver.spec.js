@@ -416,3 +416,44 @@ test('clicar em Entrar com e-mail envia o formulário para o Firebase Auth',asyn
   expect(request.postDataJSON()).toMatchObject({email,password,returnSecureToken:true});
   await expect(page.getByRole('alert')).toHaveText('E-mail ou senha inválidos.');
 });
+
+
+test('SOS de um toque funciona sem rota e confirma somente após resposta do servidor',async({page,context,request})=>{
+  const login=async role=>(await (await request.post('/api/demo',{data:{role}})).json()).token;
+  const driver=await login('driver');
+  const admin=await login('admin');
+  const headers={authorization:'Bearer '+driver};
+  const profile=await (await request.post('/api/join',{headers,data:{code:'rio-demo'}})).json();
+  const approval=await request.post('/api/companies/piloto/decision',{
+    headers:{authorization:'Bearer '+admin},data:{uid:profile.user.uid,status:'approved'}
+  });
+  expect(approval.ok()).toBe(true);
+  await page.goto('/');
+  await page.getByRole('button',{name:'Entrar como motorista'}).click();
+  await page.getByRole('button',{name:'Agora não'}).click();
+  const sos=page.getByRole('button',{name:'SOS — enviar pedido de socorro'});
+  await expect(sos).toBeInViewport();
+  await expect(page.getByRole('button',{name:'Finalizar rota'})).toBeHidden();
+  await context.setOffline(true);
+  await sos.click();
+  await expect(page.locator('#sos-status')).toHaveText('Sem internet. O SOS ainda não foi enviado.');
+  await context.setOffline(false);
+  const endpoint='**/api/companies/piloto/sos';
+  let firstId;
+  await page.route(endpoint,async route=>{
+    firstId=route.request().postDataJSON().id;
+    const saved=await route.fetch();
+    expect(saved.status()).toBe(201);
+    await route.abort();
+  });
+  await sos.click();
+  await expect(page.locator('#sos-status')).toHaveText(/Envio não confirmado/);
+  await page.unroute(endpoint);
+  const retry=page.waitForRequest(request=>request.url().endsWith('/sos') && request.method()==='POST');
+  await sos.click();
+  expect((await retry).postDataJSON().id).toBe(firstId);
+  await expect(page.locator('#sos-status')).toHaveText('SOS registrado no painel da empresa.');
+  const pending=await request.get('/api/companies/piloto/sos',{headers:{authorization:'Bearer '+admin}});
+  expect(await pending.json()).toEqual([expect.objectContaining({id:firstId,location:null})]);
+  expect((await request.get('/api/companies/piloto/sos',{headers})).status()).toBe(403);
+});

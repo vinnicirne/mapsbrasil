@@ -10,8 +10,42 @@ export function firestoreStore(database, namespace) {
   const invites=base.collection('invites');
   const companies=base.collection('companies');
   const positions=company=>base.collection('tracking').doc(company).collection('positions');
+  const alerts=company=>companies.doc(company).collection('sos');
   const member=(company,uid)=>grants.doc(hash(JSON.stringify([company,uid])));
   return {
+    async createSos(company,user,alert) {
+      const ref=alerts(company).doc(alert.id);
+      return database.runTransaction(async tx=>{
+        const [existing,membership]=await Promise.all([tx.get(ref),tx.get(member(company,user.uid))]);
+        const driver=membership.data();
+        if (driver?.status!=='approved') throw new HttpError(403,'Seu vínculo ainda não foi aprovado.');
+        const previous=existing.data();
+        if (previous) {
+          if (previous.uid!==user.uid) throw new HttpError(409,'Identificador de SOS em uso.');
+          return {id:previous.id,createdAt:previous.createdAt};
+        }
+        tx.create(ref,{...alert,uid:user.uid,driverName:driver.driverName || user.email,
+          driverPhone:driver.driverPhone || '',acknowledgedAt:null});
+        return {id:alert.id,createdAt:alert.createdAt};
+      });
+    },
+    async pendingSos(company) {
+      return (await alerts(company).where('acknowledgedAt','==',null).get()).docs.map(doc=>doc.data());
+    },
+    watchSos(company,onNext,onError) {
+      return alerts(company).where('acknowledgedAt','==',null).onSnapshot(
+        snapshot=>onNext(snapshot.docs.map(doc=>doc.data())),onError
+      );
+    },
+    async acknowledgeSos(company,id,actor) {
+      const ref=alerts(company).doc(id);
+      return database.runTransaction(async tx=>{
+        const row=(await tx.get(ref)).data();
+        if (!row) throw new HttpError(404,'SOS não encontrado.');
+        if (!row.acknowledgedAt) tx.update(ref,{acknowledgedAt:Date.now(),acknowledgedBy:actor});
+        return {id,acknowledged:true};
+      });
+    },
     async updateTracking(company,uid,update) {
       const ref=positions(company).doc(hash(uid));
       await database.runTransaction(async tx=>{

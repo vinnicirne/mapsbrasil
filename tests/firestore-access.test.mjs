@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {generateKeyPairSync,verify} from 'node:crypto';
+import {generateKeyPairSync,randomUUID,verify} from 'node:crypto';
 import {membershipService,HttpError,hash} from '../server/membership-core.mjs';
 import {createDriveHandler} from '../server/firestore-api.mjs';
 import {corporateManagement} from '../server/corporate-management.mjs';
 import {driverRegistration} from '../server/driver-registration.mjs';
 import {trackingService} from '../server/tracking.mjs';
+import {sosService} from '../server/sos.mjs';
 
 const company={id:'empresa',name:'Empresa de teste',joinCode:'teste',adminUids:['admin']};
 const admin={uid:'admin',email:'admin@example.test'};
@@ -18,8 +19,12 @@ const auth=async header=>{
 const {privateKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1',privateKeyEncoding:{format:'pem',type:'pkcs8'},publicKeyEncoding:{format:'jwk'}});
 
 function memory() {
-  const members=new Map(),invites=new Map(),companies=new Map(),positions=new Map();
+  const members=new Map(),invites=new Map(),companies=new Map(),positions=new Map(),alerts=new Map(),watchers=new Map();
   const key=(c,u)=>c+'/'+u;
+  const pending=company=>[...alerts.values()].filter(row=>row.company===company && !row.acknowledgedAt);
+  function notify(company) {
+    for (const callback of watchers.get(company) ?? []) callback(pending(company));
+  }
   return {
     getCompany:id=>companies.get(id),
     companyByCode:code=>[...companies.values()].find(company=>company.joinCode===code),
@@ -29,6 +34,28 @@ function memory() {
       return companies.get(id);
     },
     get:(c,u)=>members.get(key(c,u)),
+    createSos(company,user,alert) {
+      const id=key(company,alert.id);
+      const recorded=alerts.get(id) ?? {...alert,company,driverName:user.email,driverPhone:'',acknowledgedAt:null};
+      alerts.set(id,recorded);
+      notify(company);
+      return {id:recorded.id,createdAt:recorded.createdAt};
+    },
+    pendingSos:pending,
+    watchSos(company,onNext) {
+      if (!watchers.has(company)) watchers.set(company,new Set());
+      const list=watchers.get(company);
+      list.add(onNext);
+      onNext(pending(company));
+      return ()=>list.delete(onNext);
+    },
+    acknowledgeSos(company,id) {
+      const row=alerts.get(key(company,id));
+      if (!row) throw new HttpError(404,'SOS não encontrado.');
+      row.acknowledgedAt=Date.now();
+      notify(company);
+      return {id,acknowledged:true};
+    },
     updateTracking(c,u,value) {positions.set(key(c,u),{...value,company:c,uid:u});},
     stopTracking(c,u,session) {
       const id=key(c,u);
@@ -114,8 +141,8 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
     }
     const actor=headers.authorization.replace('Bearer ','');
     if (url.pathname.endsWith('/documents:runQuery')) {
-      assert.equal(actor,'gestor');
-      return Response.json(link ? [{document:{name:'projects/test/documents/corporate_fleet_links/outra.example',
+      assert.ok(['gestor','transportadora'].includes(actor));
+      return Response.json(link && actor==='gestor' ? [{document:{name:'projects/test/documents/corporate_fleet_links/outra.example',
         fields:{status:{stringValue:link.status}}}}] : [{}]);
     }
     assert.match(url.href,/\/projects\/painel\/databases\/corporativo\/documents\//);
@@ -133,9 +160,9 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
     return Response.json({fields:{active:{booleanValue:active}}});
   });
   const access=membershipService({store,companies,authenticate:auth,privateKey});
-  const handler=createDriveHandler({access,corporate,registerDriver:driverRegistration('fixture'),tracking:trackingService(store,access)});
-  const call=(path,{actor='gestor',source=origin,body,method=body?'POST':'GET'}={})=>handler(new Request('https://drive.example/api/'+path,{
-    method,headers:{origin:source,authorization:'Bearer '+actor},body:body && JSON.stringify(body)
+  const handler=createDriveHandler({access,corporate,registerDriver:driverRegistration('fixture'),tracking:trackingService(store,access),sos:sosService(store,access)});
+  const call=(path,{actor='gestor',source=origin,body,method=body?'POST':'GET',signal}={})=>handler(new Request('https://drive.example/api/'+path,{
+    method,signal,headers:{origin:source,authorization:'Bearer '+actor},body:body && JSON.stringify(body)
   }));
   const path='empresa/empresa.example/';
   const preflight=await call(path+'motoristas',{method:'OPTIONS'});
@@ -156,6 +183,7 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
     route:[-43,-22,-43.01,-22.01],accuracy:4,observedAt:Date.now()};
   const sendLocation=(body,companyId='empresa')=>call('companies/'+companyId+'/tracking',{actor:'driver',body});
   assert.equal((await sendLocation(location)).status,403);
+  assert.equal((await call('companies/empresa/sos',{actor:'driver',body:{id:randomUUID()}})).status,403);
   assert.equal((await (await call(path+'decisao',{body:{uid:'driver',status:'approved',company:'outra'}})).json()).members[0].status,'approved');
   assert.equal((await sendLocation(location,'outra')).status,403);
   assert.equal((await sendLocation({...location,position:[999,0]})).status,400);
@@ -190,8 +218,68 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
   assert.equal((await sendLocation(location,'outra')).status,200);
   const aggregate=await (await call(path+'localizacoes?tree=1')).json();
   assert.equal(aggregate[0].companyDomain,'outra.example');
+  const help={id:randomUUID(),location:{position:[-43,-22],observedAt:Date.now()}};
+  const sendHelp=payload=>call('companies/outra/sos',{actor:'driver',body:payload});
+  assert.equal((await sendHelp(help)).status,201);
+  const receipt=await (await sendHelp(help)).json();
+  assert.equal(receipt.id,help.id);
+  assert.equal((await call(carrierPath+'sos',{actor:'comum'})).status,403);
+  assert.equal((await call(path+'sos',{actor:'transportadora'})).status,403);
+  const alertRows=await (await call(path+'sos?tree=1')).json();
+  assert.equal(alertRows.length,1);
+  assert.deepEqual(alertRows[0].location,help.location);
+  assert.equal(alertRows[0].companyDomain,'outra.example');
+  assert.equal((await call(path+'sos-atendido',{body:{id:help.id}})).status,404);
+  assert.equal((await call(carrierPath+'sos-atendido',{body:{id:help.id}})).status,200);
+  await sendHelp(help);
+  assert.deepEqual(await (await call(path+'sos?tree=1')).json(),[]);
+  const stale={id:randomUUID(),location:{...help.location,observedAt:Date.now()-121000}};
+  assert.equal((await sendHelp(stale)).status,201);
+  assert.equal((await (await call(carrierPath+'sos')).json())[0].location,null);
   assert.equal((await call(carrierPath+'motoristas',{actor:'comum'})).status,403);
-  link=undefined;
+  const abort=new AbortController();
+  async function openStream(endpoint,actor) {
+    const response=await call(endpoint,{actor,signal:abort.signal});
+    assert.equal(response.status,200);
+    assert.match(response.headers.get('content-type'),/^text\/event-stream/);
+    const reader=response.body.getReader();
+    return async predicate=>{
+      for (;;) {
+        const chunk=await reader.read();
+        assert.equal(chunk.done,false);
+        const text=new TextDecoder().decode(chunk.value);
+        if (!text.startsWith('data: ')) continue;
+        const frame=JSON.parse(text.slice(6));
+        if (predicate(frame)) return frame;
+      }
+    };
+  }
+  try {
+    assert.equal((await call(carrierPath+'sos-stream',{actor:'comum'})).status,403);
+    const [principal,carrier]=await Promise.all([
+      openStream(path+'sos-stream?tree=1','gestor'),
+      openStream(carrierPath+'sos-stream?tree=1','transportadora')
+    ]);
+    const inCarrier=frame=>frame.domain==='outra.example';
+    const hasAlert=(frame,id)=>inCarrier(frame) && frame.alerts.some(row=>row.id===id);
+    await Promise.all([principal(frame=>hasAlert(frame,stale.id)),carrier(frame=>hasAlert(frame,stale.id))]);
+    const urgent={id:randomUUID(),location:help.location};
+    await sendHelp(urgent);
+    const [rootAlert,carrierAlert]=await Promise.all([
+      principal(frame=>hasAlert(frame,urgent.id)),carrier(frame=>hasAlert(frame,urgent.id))
+    ]);
+    assert.deepEqual(rootAlert,carrierAlert);
+    await call(carrierPath+'sos-atendido',{actor:'transportadora',body:{id:urgent.id}});
+    await Promise.all([principal(frame=>inCarrier(frame) && !hasAlert(frame,urgent.id)),
+      carrier(frame=>inCarrier(frame) && !hasAlert(frame,urgent.id))]);
+    link=undefined;
+    const afterRevocation={id:randomUUID()};
+    await sendHelp(afterRevocation);
+    await Promise.all([principal(frame=>inCarrier(frame) && frame.alerts.length===0),
+      carrier(frame=>hasAlert(frame,afterRevocation.id))]);
+  } finally {
+    abort.abort();
+  }
   assert.equal((await call(carrierPath+'motoristas')).status,403);
   assert.ok((await (await call(path+'localizacoes?tree=1')).json()).every(row=>row.companyDomain==='empresa.example'));
   const newPath='empresa/nova.example/';

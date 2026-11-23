@@ -92,7 +92,8 @@ let packLoad;
 const navigatorUI=makeNavigator($('navigation'),{download,prepareDestination,persist,reportError:report,
   searchNational:(query,near,signal)=>apiFor('search',{method:'POST',body:{query,near},signal}),
   routeNational:(start,stops)=>apiFor('route',{method:'POST',body:{start,stops}}),
-  sendTracking:(id,body)=>api('/companies/'+encodeURIComponent(id)+'/tracking',{method:'POST',body})});
+  sendTracking:(id,body)=>api('/companies/'+encodeURIComponent(id)+'/tracking',{method:'POST',body}),
+  sendSos:(id,body)=>api('/companies/'+encodeURIComponent(id)+'/sos',{method:'POST',body})});
 $('route-menu-title').parentElement.after($('company').closest('.company-bar'));
 
 async function api(path,{method='GET',body,raw=false,signal}={}) {
@@ -126,6 +127,7 @@ function renderNetwork() {
   navigatorUI.setNetwork(online);
 }
 function screen(name) {
+  if (name!=='workspace') navigatorUI.setSosCompany();
   for (const id of ['welcome','workspace','management']) $(id).hidden=id!==name;
 }
 function accessScreen(title,copy,{login=false,join=false,verify=false,retry=false}={}) {
@@ -159,6 +161,7 @@ async function clearLocal() {
 function showSnapshot() {
   screen('workspace');
   company=snapshot.company;
+  navigatorUI.setSosCompany({id:company,uid:snapshot.uid});
   fillSelect($('company'),[{id:company,name:snapshot.companyName}],company);
   $('sample-label').hidden=snapshot.pack.riskMode!=='sample';
   navigatorUI.restore(snapshot);
@@ -266,6 +269,7 @@ async function refresh(updatedProfile) {
 
 async function chooseCompany(id) {
   const membership=profile.memberships.find(member=>member.company===id && member.status==='approved');
+  navigatorUI.setSosCompany(config?.sos && membership ? {id,uid:profile.user.uid} : undefined);
   navigatorUI.setTrackingCompany(config?.tracking && membership?{
     id,uid:profile.user.uid,companyName:membership.name,driverName:membership.driverName || profile.user.email.split('@')[0]
   }:undefined);
@@ -411,6 +415,7 @@ $('verify-email').onclick=run(async()=>{
 $('logout').onclick=run(async()=>{
   refreshSequence++;
   localStorage.setItem('mapsbrasil-signout','1');
+  navigatorUI.setSosCompany();
   await navigatorUI.stopTracking();
   await clearLocal();
   if (auth) {

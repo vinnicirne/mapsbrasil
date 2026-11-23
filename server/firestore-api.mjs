@@ -6,6 +6,8 @@ import {nationalNavigation} from './national-navigation.mjs';
 import {corporateDomainPattern,corporateManagement} from './corporate-management.mjs';
 import {driverRegistration} from './driver-registration.mjs';
 import {trackingService} from './tracking.mjs';
+import {sosService} from './sos.mjs';
+import {streamSos} from './sos-stream.mjs';
 
 const responseHeaders={'cache-control':'no-store','x-content-type-options':'nosniff'};
 const json=(value,status=200)=>Response.json(value,{status,headers:responseHeaders});
@@ -29,7 +31,7 @@ async function readBody(request) {
   throw new HttpError(400,'Dados inválidos.');
 }
 
-export function createDriveHandler({access, firebase, packBytes, national, corporate, registerDriver, tracking}) {
+export function createDriveHandler({access, firebase, packBytes, national, corporate, registerDriver, tracking, sos}) {
   const pack=packBytes && JSON.parse(packBytes);
   const packInfo=pack && {version:pack.version,region:pack.region,size:packBytes.length,sha256:hash(packBytes),
     bounds:pack.bounds,dataDate:pack.dataDate,riskMode:pack.riskMode};
@@ -43,7 +45,7 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
       const named=url.searchParams.getAll('endpoint');
       const endpoint=named.length===1 ? named[0] : named.length===0 ? url.pathname.slice('/api/'.length) : '';
       const method=request.method;
-      const corporateRoute=/^empresa\/([a-z0-9.-]+)\/(motoristas|convite|decisao|cadastro|localizacoes|perfil)$/.exec(endpoint);
+      const corporateRoute=/^empresa\/([a-z0-9.-]+)\/(motoristas|convite|decisao|cadastro|localizacoes|perfil|sos|sos-atendido|sos-stream)$/.exec(endpoint);
       if (corporateRoute) {
         if (!corporate || request.headers.get('origin')!==corporate.origin) {
           throw new HttpError(403,'Integração com o Painel Empresa indisponível.');
@@ -55,25 +57,66 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
         }});
         const [,domain,action]=corporateRoute;
         if (!corporateDomainPattern.test(domain)) throw new HttpError(400,'Identificador de empresa inválido.');
-        if (method!==(['motoristas','localizacoes'].includes(action)?'GET':'POST')) throw new HttpError(405,'Método indisponível.');
+        if (method!==(['motoristas','localizacoes','sos','sos-stream'].includes(action)?'GET':'POST')) throw new HttpError(405,'Método indisponível.');
         const authorization=request.headers.get('authorization');
         const {company,user,direct}=await corporate.authorize(domain,authorization);
-        if (action==='motoristas') return reply({joinCode:company.joinCode,members:await access.members(user,company.id)});
-        if (action==='localizacoes' && tracking) {
-          const root=tracking.live(company.id);
-          if (!direct || new URL(request.url).searchParams.get('tree')!=='1') return reply(await root);
-          const branches=corporate.branches(domain,authorization).then(domains=>Promise.all(domains.map(async branch=>{
+        async function loadBranches(load) {
+          const domains=await corporate.branches(domain,authorization);
+          const rows=await Promise.all(domains.map(async branch=>{
             try {
-              const {company: carrier}=await corporate.authorize(branch,authorization);
-              return (await tracking.live(carrier.id)).map(position=>({...position,companyName:carrier.name,companyDomain:branch}));
+              const {company:carrier}=await corporate.authorize(branch,authorization);
+              return load(branch,carrier);
             } catch (error) {
               if (error.status===403) return [];
               throw error;
             }
-          })));
-          const [local,descendants]=await Promise.all([root,branches]);
+          }));
+          return rows.flat();
+        }
+        if (action==='sos' || action==='sos-atendido' || action==='sos-stream') {
+          if (!sos) throw new HttpError(503,'Serviço de SOS indisponível.');
+          if (action==='sos-atendido') return reply(await sos.acknowledge(company.id,(await readBody(request)).id,user));
+          const format=(branch,record,alert)=>({
+            id:alert.id,createdAt:alert.createdAt,driverName:alert.driverName,driverPhone:alert.driverPhone,
+            location:alert.location,companyDomain:branch,companyName:record.name
+          });
+          if (action==='sos-stream') {
+            if (!sos.subscribe) throw new HttpError(503,'Canal de SOS indisponível.');
+            const companies=new Map([[domain,company]]);
+            if (direct && url.searchParams.get('tree')==='1') {
+              for (const [branch,carrier] of await loadBranches((branch,carrier)=>[[branch,carrier]])) {
+                companies.set(branch,carrier);
+              }
+            }
+            return streamSos({companies,subscribe:sos.subscribe,format,signal:request.signal,
+              headers:{...responseHeaders,...corporateHeaders},
+              async verify(branch,id) {
+                try {
+                  if (branch!==domain && !(await corporate.authorize(domain,authorization)).direct) return false;
+                  const match=await corporate.authorize(branch,authorization);
+                  return match.company.id===id;
+                } catch (error) {
+                  if (error.status===403) return false;
+                  throw error;
+                }
+              }
+            });
+          }
+          const list=async (branch,record)=>(await sos.pending(record.id)).map(alert=>format(branch,record,alert));
+          const local=list(domain,company);
+          if (!direct || url.searchParams.get('tree')!=='1') return reply(await local);
+          const [own,linked]=await Promise.all([local,loadBranches(list)]);
+          return reply([...own,...linked].sort((left,right)=>right.createdAt-left.createdAt));
+        }
+        if (action==='motoristas') return reply({joinCode:company.joinCode,members:await access.members(user,company.id)});
+        if (action==='localizacoes' && tracking) {
+          const root=tracking.live(company.id);
+          if (!direct || new URL(request.url).searchParams.get('tree')!=='1') return reply(await root);
+          const [local,descendants]=await Promise.all([root,loadBranches(async (branch,carrier)=>
+            (await tracking.live(carrier.id)).map(position=>({...position,companyName:carrier.name,companyDomain:branch}))
+          )]);
           const positions=new Map();
-          for (const row of [...local.map(position=>({...position,companyName:company.name,companyDomain:domain})),...descendants.flat()]) {
+          for (const row of [...local.map(position=>({...position,companyName:company.name,companyDomain:domain})),...descendants]) {
             if (!positions.has(row.uid) || positions.get(row.uid).updatedAt<row.updatedAt) positions.set(row.uid,row);
           }
           return reply([...positions.values()]);
@@ -93,8 +136,8 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
         if (action==='perfil') return reply({joinCode:company.joinCode,members:await access.editContact(user,company.id,input.uid,driverContact(input))});
         return reply({joinCode:company.joinCode,members:await access.depart(user,company.id,input.uid,input.status)});
       }
-      const companyRoute=/^companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route|tracking)$/.exec(endpoint);
-      if (endpoint==='config' && method==='GET') return json({firebase,demo:false,signup:null,tracking:!!tracking});
+      const companyRoute=/^companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route|tracking|sos)$/.exec(endpoint);
+      if (endpoint==='config' && method==='GET') return json({firebase,demo:false,signup:null,tracking:!!tracking,sos:!!sos});
       if (!companyRoute && !['me','join','accept'].includes(endpoint)) throw new HttpError(404,'Recurso não encontrado.');
       const user=await access.authenticate(request.headers.get('authorization'));
       if (endpoint==='me' && method==='GET') return json(await access.me(user));
@@ -102,6 +145,7 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
       if (endpoint==='accept' && method==='POST') return json(await access.acceptInvite(user,(await readBody(request)).token));
       if (companyRoute) {
         const [,company,action]=companyRoute;
+        if (action==='sos' && method==='POST' && sos) return json(await sos.send(user,company,await readBody(request)),201);
         if (action==='tracking' && method==='POST' && tracking) return json(await tracking.update(user,company,await readBody(request)));
         if (action==='members' && method==='GET') return json(await access.members(user,company));
         if (action==='decision' && method==='POST') {
@@ -153,6 +197,6 @@ export async function configureDriveHandler(env) {
     ? (env.ALLOW_SAMPLE_PACK==='1' ? await readFile(new URL('../public/packs/rio-do-ouro.json',import.meta.url)) : null)
     : await readFile(new URL('./packs/rio-do-ouro-faccoes.json',import.meta.url));
   return createDriveHandler({access,firebase,packBytes,corporate:corporateManagement({env,companies,ensureCompany:store.ensureCompany}),
-    tracking:trackingService(store,access),registerDriver:driverRegistration(firebase.apiKey),
+    tracking:trackingService(store,access),sos:sosService(store,access),registerDriver:driverRegistration(firebase.apiKey),
     national:nationalNavigation({env,limit:kind=>store.reserveProvider(kind)})});
 }
