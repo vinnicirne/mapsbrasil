@@ -11,16 +11,22 @@ export function routeCoordinates(route,legIndex) {
     .flatMap(point=>point.map(value=>Number(value.toFixed(5))));
 }
 
-export function createTrackingControl({form,button,send,route,openSettings,latestFix}) {
+export function createTrackingControl({dialog,status,button,send,route,beforePrompt,latestFix}) {
+  const form=dialog.querySelector('form');
   const name=form.querySelector('input');
-  const status=form.querySelector('[role="status"]');
-  const submit=form.querySelector('button');
-  let company,active;
+  const companyName=dialog.querySelector('#tracking-company');
+  let scope,active,preference,attempted=false;
+
+  function remember(value) {
+    preference=value;
+    try {localStorage.setItem(scope.key,JSON.stringify(value));} catch { /* Consent still applies to this open session. */ }
+  }
 
   function feedback(text) {
     status.textContent=text;
+    status.hidden=!scope || !text;
     button.textContent=active?'Parar compartilhamento':'Compartilhar GPS';
-    button.hidden=!company;
+    button.hidden=!scope;
   }
 
   async function stop() {
@@ -29,9 +35,8 @@ export function createTrackingControl({form,button,send,route,openSettings,lates
     active=undefined;
     clearInterval(session.timer);
     navigator.geolocation.clearWatch(session.watch);
-    submit.textContent='Compartilhar localização';
-    name.disabled=false;
     feedback('Compartilhamento encerrado.');
+    if (!session.attemptedUpload) return;
     try {
       await session.sending?.catch(()=>{});
       await send(session.company,{session:session.id,stop:true});
@@ -41,13 +46,14 @@ export function createTrackingControl({form,button,send,route,openSettings,lates
   function publish(session,{coords,timestamp}) {
     if (active!==session || document.hidden || !navigator.onLine || session.sending) return;
     if (coords.accuracy>1000) return feedback('Aguardando sinal de GPS mais preciso…');
+    session.attemptedUpload=true;
     session.sending=send(session.company,{
       session:session.id,name:session.name,position:[coords.longitude,coords.latitude],
       accuracy:coords.accuracy,observedAt:Math.round(timestamp),route:route()
     });
     session.sending.then(()=>{
       session.sent=true;
-      if(active===session) feedback('Localização compartilhada com a empresa.');
+      if(active===session) feedback('GPS enviado para '+session.companyName+'.');
     }).catch(error=>{
       if (active!==session) return;
       if ([401,403].includes(error.status)) void stop();
@@ -79,39 +85,81 @@ export function createTrackingControl({form,button,send,route,openSettings,lates
     },geoOptions);
   }
 
-  form.onsubmit=event=>{
-    event.preventDefault();
-    if(active) return void stop();
-    if(!company || !navigator.geolocation || !name.value.trim()) return feedback('Informe seu nome e permita o GPS.');
-    const session=active={id:crypto.randomUUID(),company,name:name.value.trim(),timer:setInterval(refresh,interval)};
-    submit.textContent='Parar compartilhamento';
-    name.disabled=true;
+  function start() {
+    if (!scope || active) return;
+    attempted=true;
+    if (!navigator.geolocation) return feedback('GPS indisponível neste navegador.');
+    const session=active={id:crypto.randomUUID(),company:scope.id,companyName:scope.companyName,
+      name:preference.name,timer:setInterval(refresh,interval)};
     feedback('Obtendo posição do GPS…');
     session.watch=navigator.geolocation.watchPosition(fix=>{
       session.fix=fix;
       if(!session.sent) publish(session,fix);
     },error=>failedFix(session,error),geoOptions);
     refresh();
+  }
+
+  function prompt() {
+    if (!scope || dialog.open) return;
+    beforePrompt();
+    dialog.showModal();
+  }
+
+  function resume() {
+    if (!scope || document.hidden || !navigator.onLine) return;
+    if(active) return refresh();
+    if(attempted) return;
+    if(preference?.enabled) start();
+    else if(!preference) prompt();
+  }
+
+  function decline() {
+    remember({enabled:false});
+    dialog.close();
+    feedback('');
+  }
+
+  form.onsubmit=event=>{
+    event.preventDefault();
+    if(!scope || !name.value.trim()) return;
+    remember({enabled:true,name:name.value.trim()});
+    dialog.close();
+    start();
   };
+  dialog.querySelector('#tracking-decline').onclick=decline;
+  dialog.addEventListener('cancel',event=>{event.preventDefault();decline();});
   button.onclick=()=>{
-    if(active) return void stop();
-    openSettings();
-    name.focus();
+    if(active) {
+      remember({enabled:false});
+      return void stop();
+    }
+    prompt();
   };
-  window.addEventListener('online',refresh);
+  window.addEventListener('online',resume);
   window.addEventListener('offline',refresh);
-  document.addEventListener('visibilitychange',refresh);
+  document.addEventListener('visibilitychange',resume);
   return {
     stop,refresh,
-    setCompany(id,driverName) {
-      if (company!==id) {
-        void stop();
-        name.value=driverName ?? '';
+    setCompany(context) {
+      const key=context && 'mapsbrasil-gps-v1:'+encodeURIComponent(context.uid)+':'+encodeURIComponent(context.id);
+      if (scope?.key===key) return;
+      if(dialog.open) dialog.close();
+      void stop();
+      scope=context && {...context,key};
+      attempted=false;
+      preference=undefined;
+      if(scope) {
+        try {
+          const saved=JSON.parse(localStorage.getItem(key));
+          if (saved?.enabled===false || (saved?.enabled===true && typeof saved.name==='string' && saved.name.trim() && saved.name.length<=100)) {
+            preference=saved;
+          }
+        } catch { /* Ask for consent when no preference can be recovered. */ }
+        companyName.textContent=scope.companyName;
+        name.value=preference?.name || scope.driverName;
       }
-      company=id;
-      form.hidden=!id;
-      button.hidden=!id;
-      if(id && !active) button.textContent='Compartilhar GPS';
+      feedback('');
+      resume();
     }
   };
 }

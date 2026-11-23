@@ -79,7 +79,7 @@ A aba **Motoristas** usa a sessão do Painel Empresa. A API valida o token e con
 
 O backend local conserva o SQLite para demonstração independente. Para uma hospedagem separada, a ponte na Vercel também aceita `MAPSBRASIL_API_ORIGIN` quando `FIRESTORE_PROJECT_ID` estiver ausente.
 
-O mapa da aba **Motoristas** consulta localizações a cada 10 segundos enquanto está visível. O motorista inicia e encerra o compartilhamento no menu **Rotas**. O Drive envia a posição e o traçado da navegação a cada 15 segundos com o aplicativo visível e conectado. O painel deixa de exibir a posição após 65 segundos sem atualização. O servidor mantém apenas a posição e rota mais recentes de cada motorista. Configure no Firestore do Drive a política TTL para o campo `expiresAt` do grupo de coleções `positions` para excluir os documentos expirados.
+O mapa da aba **Motoristas** consulta localizações a cada 10 segundos enquanto está visível. No primeiro acesso à empresa, o Drive pede consentimento para compartilhar a posição e a rota com ela. Com o GPS autorizado, o envio começa sem outra ação e é retomado ao reabrir o PWA com a mesma conta e empresa. O botão **Parar compartilhamento** encerra a sessão e desativa a retomada. O Drive envia a posição e o traçado da navegação a cada 15 segundos com o aplicativo visível e conectado. O painel deixa de exibir a posição após 65 segundos sem atualização. O servidor mantém apenas a posição e rota mais recentes de cada motorista. Configure no Firestore do Drive a política TTL para o campo `expiresAt` do grupo de coleções `positions` para excluir os documentos expirados.
 
 ## Gerar um pacote regional
 

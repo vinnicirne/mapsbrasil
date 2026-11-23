@@ -54,6 +54,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(page.locator('#join-feedback')).toHaveText('Seu acesso a Operação Rio do Ouro já está aprovado.');
   await expect(page.getByRole('link',{name:'Voltar ao mapa'})).toBeVisible();
   await page.goto('/');
+  await page.getByRole('button',{name:'Agora não'}).click();
   let releaseLocal;
   const nationalPending=new Promise(resolve=>{releaseLocal=resolve;});
   await page.route('**/api/companies/piloto/search',async route=>{
@@ -88,7 +89,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   expect(await livePositions()).toEqual([]);
   await page.getByRole('button',{name:'Compartilhar GPS'}).click();
   await page.getByLabel('Seu nome').fill('Motorista de teste');
-  await page.getByRole('button',{name:'Compartilhar localização'}).click();
+  await page.getByRole('button',{name:'Permitir e compartilhar'}).click();
   await expect.poll(async()=>(await livePositions())[0]?.name).toBe('Motorista de teste');
   const firstLocation=(await livePositions())[0];
   expect(firstLocation.position).toEqual(origin);
@@ -96,7 +97,6 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   const nextPoint=[origin[0]+0.00001,origin[1]];
   await locate(driver,nextPoint);
   await expect.poll(async()=>(await livePositions())[0]?.position,{timeout:20000}).toEqual(nextPoint);
-  await page.keyboard.press('Escape');
   await page.locator('#tracking-stop').click();
   await expect.poll(livePositions).toEqual([]);
   await locate(driver,origin);
@@ -242,6 +242,79 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(page.locator('#travel-distance')).toContainText('Parada 1');
   await company.close();
   await driver.close();
+});
+
+test('Drive solicita consentimento e retoma o GPS somente para a conta e a empresa autorizadas',async({browser,baseURL,request})=>{
+  const login=async role=>(await (await request.post('/api/demo',{data:{role}})).json()).token;
+  const driverToken=await login('driver');
+  const adminToken=await login('admin');
+  const headers={authorization:'Bearer '+driverToken};
+  const profile=await (await request.post('/api/join',{headers,data:{code:'rio-demo'}})).json();
+  const approval=await request.post('/api/companies/piloto/decision',{
+    headers:{authorization:'Bearer '+adminToken},data:{uid:profile.user.uid,status:'approved'}
+  });
+  expect(approval.ok()).toBe(true);
+
+  const context=await browser.newContext({baseURL,geolocation:asPosition(origin),permissions:['geolocation']});
+  const page=await context.newPage();
+  const requests=[];
+  page.on('request',request=>{
+    if(request.method()==='POST' && new URL(request.url()).pathname.endsWith('/tracking')) requests.push(request.postDataJSON());
+  });
+  const tracking=(request)=>request.method()==='POST' && new URL(request.url()).pathname.endsWith('/tracking');
+  await page.goto('/');
+  await page.getByRole('button',{name:'Entrar como motorista'}).click();
+  const permission=page.getByRole('dialog',{name:'Compartilhar GPS com Operação Rio do Ouro'});
+  await expect(permission).toBeVisible();
+  expect(requests).toEqual([]);
+  const first=page.waitForRequest(request=>tracking(request) && !request.postDataJSON().stop);
+  await permission.getByRole('button',{name:'Permitir e compartilhar'}).click();
+  const session=(await first).postDataJSON().session;
+  await expect(page.locator('#tracking-status')).toHaveText('GPS enviado para Operação Rio do Ouro.');
+
+  const resumed=page.waitForRequest(request=>tracking(request) && !request.postDataJSON().stop && request.postDataJSON().session!==session);
+  await page.reload();
+  await resumed;
+  await expect(permission).toBeHidden();
+  await expect(page.locator('#tracking-status')).toHaveText('GPS enviado para Operação Rio do Ouro.');
+  const otherCompany='Outra empresa';
+  const countBeforeSwitch=requests.length;
+  await page.route('**/api/me',async route=>{
+    const response=await route.fetch();
+    const actual=await response.json();
+    await route.fulfill({response,json:{...actual,memberships:[{...actual.memberships[0],company:'outra',name:otherCompany}]}});
+  });
+  await page.route('**/api/companies/outra/pack',route=>route.fulfill({json:null}));
+  await page.reload();
+  await expect(page.getByRole('dialog',{name:'Compartilhar GPS com '+otherCompany})).toBeVisible();
+  expect(requests).toHaveLength(countBeforeSwitch);
+  await page.getByRole('button',{name:'Agora não'}).click();
+  await page.unroute('**/api/me');
+  const returning=page.waitForRequest(request=>tracking(request) && !request.postDataJSON().stop);
+  await page.reload();
+  await returning;
+  await expect(page.locator('#tracking-status')).toHaveText('GPS enviado para Operação Rio do Ouro.');
+  const stopped=page.waitForRequest(request=>tracking(request) && request.postDataJSON().stop===true);
+  await page.getByRole('button',{name:'Parar compartilhamento'}).click();
+  await stopped;
+  const count=requests.length;
+  await page.reload();
+  await expect(page.getByRole('button',{name:'Compartilhar GPS'})).toBeVisible();
+  await expect(permission).toBeHidden();
+  expect(requests).toHaveLength(count);
+  expect(requests.filter(entry=>!entry.stop).every(entry=>entry.position.length===2)).toBe(true);
+
+  await page.addInitScript(()=>{
+    const deny=(_,failure)=>queueMicrotask(()=>failure({code:1}));
+    navigator.geolocation.getCurrentPosition=deny;
+    navigator.geolocation.watchPosition=(success,failure)=>{deny(success,failure);return 1;};
+  });
+  await page.reload();
+  await page.getByRole('button',{name:'Compartilhar GPS'}).click();
+  await permission.getByRole('button',{name:'Permitir e compartilhar'}).click();
+  await expect(page.locator('#tracking-status')).toHaveText('Autorize a localização no navegador para compartilhar.');
+  expect(requests).toHaveLength(count);
+  await context.close();
 });
 
 test('frontend distingue API ausente de dispositivo offline e permite nova tentativa', async ({page})=>{

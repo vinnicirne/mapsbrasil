@@ -159,7 +159,6 @@ async function clearLocal() {
 function showSnapshot() {
   screen('workspace');
   company=snapshot.company;
-  navigatorUI.setTrackingCompany(config?.tracking?company:undefined);
   fillSelect($('company'),[{id:company,name:snapshot.companyName}],company);
   $('sample-label').hidden=snapshot.pack.riskMode!=='sample';
   navigatorUI.restore(snapshot);
@@ -205,6 +204,7 @@ async function refresh(updatedProfile) {
   renderNetwork();
   if (!auth) return accessScreen('Login em preparação','A administração precisa configurar o provedor de identidade do piloto.');
   if (!await auth.token()) {
+    navigatorUI.setTrackingCompany();
     if (snapshot) await clearLocal();
     return accessScreen('Entre para navegar','Use seu e-mail verificado para acessar suas rotas e preparar o mapa offline.',{login:true});
   }
@@ -240,6 +240,7 @@ async function refresh(updatedProfile) {
   const approved=profile.memberships.filter(member=>member.status==='approved');
   if (snapshot && (snapshot.uid!==profile.user.uid || !approved.some(member=>member.company===snapshot.company))) await clearLocal();
   if (isManagement) {
+    navigatorUI.setTrackingCompany();
     if (!profile.companies.length) return accessScreen('Acesso restrito','A gestão de motoristas é reservada aos administradores da empresa.');
     screen('management');
     const select=$('managed-company');
@@ -262,7 +263,10 @@ async function refresh(updatedProfile) {
 }
 
 async function chooseCompany(id) {
-  navigatorUI.setTrackingCompany(config?.tracking?id:undefined,profile.memberships.find(member=>member.company===id)?.driverName);
+  const membership=profile.memberships.find(member=>member.company===id && member.status==='approved');
+  navigatorUI.setTrackingCompany(config?.tracking && membership?{
+    id,uid:profile.user.uid,companyName:membership.name,driverName:membership.driverName || profile.user.email.split('@')[0]
+  }:undefined);
   if (company!==id) {
     company=id;
     info=undefined;

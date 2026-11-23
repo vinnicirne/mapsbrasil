@@ -15,14 +15,6 @@ const outputTemplate=`
   <dialog class="route-panel" id="route-menu" aria-labelledby="route-menu-title">
     <div class="route-title"><h1 id="route-menu-title">Rotas</h1><button id="close-route-menu" class="icon-button close-menu" type="button" aria-label="Fechar menu de rotas" autofocus>×</button></div>
     <a class="text-button" href="/?vinculo=1">Vincular outra empresa</a>
-    <form class="fleet-sharing" id="tracking-form" aria-labelledby="tracking-title" hidden>
-      <h2 id="tracking-title">Compartilhar com a empresa</h2>
-      <p>Compartilha sua posição e a rota em navegação enquanto o Drive está aberto e conectado.</p>
-      <label for="tracking-name">Seu nome</label>
-      <input id="tracking-name" required maxlength="100" autocomplete="name">
-      <button class="secondary wide" type="submit">Compartilhar localização</button>
-      <p role="status"></p>
-    </form>
     <section class="pack-card">
       <div class="pack-top"><span class="download-icon" aria-hidden="true">⇩</span><div><h2>Mapa offline</h2><p id="pack-info">Selecione sua empresa para continuar.</p></div></div>
       <button class="secondary wide" id="download" type="button">Baixar região</button>
@@ -42,6 +34,18 @@ const outputTemplate=`
       <ol id="itinerary"></ol>
     </section>
     <p class="fine">Mantenha o PWA visível para receber alertas. O GPS é usado durante a navegação.</p>
+  </dialog>
+  <dialog class="fleet-consent" id="tracking-consent" aria-labelledby="tracking-title" aria-describedby="tracking-description">
+    <form id="tracking-form">
+      <h2 id="tracking-title">Compartilhar GPS com <span id="tracking-company"></span></h2>
+      <p id="tracking-description">A empresa verá sua posição e a rota em andamento enquanto o Drive estiver visível e conectado. Se você autorizar, o envio será retomado ao reabrir o app nesta empresa. Você pode interromper pelo botão no mapa.</p>
+      <label for="tracking-name">Seu nome</label>
+      <input id="tracking-name" required maxlength="100" autocomplete="name">
+      <div class="fleet-consent-actions">
+        <button class="secondary" id="tracking-decline" type="button" autofocus>Agora não</button>
+        <button class="primary" type="submit">Permitir e compartilhar</button>
+      </div>
+    </form>
   </dialog>
   <section class="map-wrap" aria-label="Mapa de navegação">
     <div id="national-map" role="region" aria-label="Mapa de navegação do Brasil" hidden></div>
@@ -64,7 +68,10 @@ const outputTemplate=`
       <div><span id="turn-distance"></span><h2 id="turn-name">Obtendo GPS</h2><p id="turn-road"></p></div>
     </div>
     <p class="risk-banner" id="risk" role="alert" hidden></p>
-    <button class="secondary fleet-badge" id="tracking-stop" type="button" hidden></button>
+    <div class="fleet-badge">
+      <p id="tracking-status" class="fleet-status" role="status" hidden></p>
+      <button class="secondary" id="tracking-stop" type="button" hidden></button>
+    </div>
     <div class="map-controls" aria-label="Controles do mapa"><button id="zoom-in" type="button" aria-label="Aproximar">+</button><button id="zoom-out" type="button" aria-label="Afastar">−</button><button id="fit" type="button" aria-label="Centralizar mapa">◎</button></div>
     <div class="travel" id="travel" hidden>
       <div><strong id="travel-time"></strong><span id="travel-distance"></span></div>
@@ -89,10 +96,10 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   const audio=new Audio();
   let hasStoredPack=false,connected=false,nationalMap,nationalLoading,findLocal,factions,alertFactions,factionLoad,selectedSearchPoint,lastReroute=0,planning=false;
   const tracker=createTrackingControl({
-    form:$('tracking-form'),button:$('tracking-stop'),send:sendTracking,
+    dialog:$('tracking-consent'),status:$('tracking-status'),button:$('tracking-stop'),send:sendTracking,
     route:()=>nav?routeCoordinates(route,legIndex):[],
     latestFix:()=>nav?navigationFix:undefined,
-    openSettings:()=>{endPointSelection();openMenu();}
+    beforePrompt:()=>{endPointSelection();if(menu.open) menu.close();}
   });
   function openMenu() {
     menu.showModal();
