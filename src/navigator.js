@@ -33,12 +33,18 @@ const outputTemplate=`
       <p class="inline-note" id="nav-notice" aria-live="polite"></p>
       <ol id="itinerary"></ol>
     </section>
+    <section class="pack-card" id="tracking-settings" aria-labelledby="tracking-settings-title" hidden>
+      <h2 id="tracking-settings-title">Localização</h2>
+      <p>Mantenha o Drive aberto para atualizar sua posição no painel da empresa.</p>
+      <p id="tracking-status" role="status" hidden></p>
+      <button class="secondary" id="tracking-stop" type="button" hidden></button>
+    </section>
     <p class="fine">Mantenha o PWA visível para receber alertas. O GPS é usado durante a navegação.</p>
   </dialog>
   <dialog class="fleet-consent" id="tracking-consent" aria-labelledby="tracking-title" aria-describedby="tracking-description">
     <form id="tracking-form">
       <h2 id="tracking-title">Permitir localização</h2>
-      <p id="tracking-description">Permita o acesso à localização quando o navegador pedir. <strong id="tracking-company"></strong> verá sua posição e a rota em andamento enquanto o Drive estiver visível e conectado. O envio será retomado ao reabrir o app para esta empresa. Você pode parar pelo botão no mapa.</p>
+      <p id="tracking-description">Permita o acesso à localização quando o navegador pedir. <strong id="tracking-company"></strong> verá sua posição e a rota em andamento enquanto o Drive estiver visível e conectado. Empresas com permissão de gestão dos motoristas também terão acesso. O envio será retomado ao reabrir o app para esta empresa. Você pode desativar o envio em Localização, no menu do Drive.</p>
       <p id="tracking-permission-help" role="alert" hidden>A localização está bloqueada. Nas permissões do site ou do app, libere a localização. Depois, volte ao Drive e toque em Tentar novamente.</p>
       <label for="tracking-name">Seu nome</label>
       <input id="tracking-name" required maxlength="100" autocomplete="name">
@@ -69,10 +75,7 @@ const outputTemplate=`
       <div><span id="turn-distance"></span><h2 id="turn-name">Obtendo GPS</h2><p id="turn-road"></p></div>
     </div>
     <p class="risk-banner" id="risk" role="alert" hidden></p>
-    <div class="fleet-badge">
-      <p id="tracking-status" class="fleet-status" role="status" hidden></p>
-      <button class="secondary" id="tracking-stop" type="button" hidden></button>
-    </div>
+
     <div class="map-controls" aria-label="Controles do mapa"><button id="zoom-in" type="button" aria-label="Aproximar">+</button><button id="zoom-out" type="button" aria-label="Afastar">−</button><button id="fit" type="button" aria-label="Centralizar mapa">◎</button></div>
     <div class="travel" id="travel" hidden>
       <div><strong id="travel-time"></strong><span id="travel-distance"></span></div>
@@ -97,7 +100,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   const audio=new Audio();
   let hasStoredPack=false,connected=false,nationalMap,nationalLoading,findLocal,factions,alertFactions,factionLoad,selectedSearchPoint,lastReroute=0,planning=false,demo=false;
   const tracker=createTrackingControl({
-    dialog:$('tracking-consent'),status:$('tracking-status'),button:$('tracking-stop'),send:sendTracking,
+    dialog:$('tracking-consent'),status:$('tracking-status'),button:$('tracking-stop'),settings:$('tracking-settings'),send:sendTracking,
     route:()=>nav?routeCoordinates(route,legIndex):[],
     latestFix:()=>nav?navigationFix:undefined,
     beforePrompt:()=>{endPointSelection();if(menu.open) menu.close();}

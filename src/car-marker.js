@@ -1,24 +1,51 @@
-export function drawCar(context) {
-  context.fillStyle='#15352f';
-  for (const x of [-12,8]) {
-    context.fillRect(x,-10,4,7);
-    context.fillRect(x,5,4,7);
-  }
+export function drawCar(context,color='#2362de') {
+  // Paint the side and front faces first so the car reads at map-marker size.
+  context.lineJoin='round';
   context.beginPath();
-  context.roundRect(-10,-16,20,32,7);
-  context.fillStyle='#215dde';
-  context.strokeStyle='#fff';
+  context.moveTo(-13,0);
+  context.lineTo(-5,-10);
+  context.lineTo(9,-9);
+  context.lineTo(14,-2);
+  context.lineTo(14,5);
+  context.lineTo(6,11);
+  context.lineTo(-13,6);
+  context.closePath();
+  context.fillStyle=color;
+  context.fill();
   context.lineWidth=2.5;
+  context.strokeStyle='#fff';
   context.stroke();
+
+  context.beginPath();
+  context.moveTo(-12,1);
+  context.lineTo(6,5);
+  context.lineTo(13,-1);
+  context.lineTo(13,4);
+  context.lineTo(6,9);
+  context.lineTo(-12,5);
+  context.closePath();
+  context.fillStyle='#13294d';
   context.fill();
 
   context.beginPath();
-  context.roundRect(-6,-8,12,6,2);
-  context.roundRect(-6,6,12,4,1.5);
-  context.fillStyle='#c9e4ff';
+  context.moveTo(-8,-2);
+  context.lineTo(-4,-8);
+  context.lineTo(6,-7);
+  context.lineTo(2,-1);
+  context.closePath();
+  context.fillStyle='#d1f2fa';
   context.fill();
 
-  context.fillStyle='#fff';
-  context.fillRect(-6,-13,3,2);
-  context.fillRect(3,-13,3,2);
+  context.beginPath();
+  context.moveTo(3,-1);
+  context.lineTo(7,-7);
+  context.lineTo(11,-3);
+  context.lineTo(7,1);
+  context.closePath();
+  context.fillStyle='#6eb8d1';
+  context.fill();
+
+  context.fillStyle='#fff6cf';
+  context.fillRect(-10,2,3,1.7);
+  context.fillRect(1,4.5,3,1.7);
 }

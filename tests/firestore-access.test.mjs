@@ -83,6 +83,7 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
   const profiles={
     gestor:{companyDomain:'empresa.example',status:'approved',companyRole:'company_admin'},
     suspenso:{companyDomain:'empresa.example',status:'approved',companyRole:'company_admin',licenseStatus:'suspended'},
+    transportadora:{companyDomain:'outra.example',status:'approved',companyRole:'company_admin'},
     comum:{companyDomain:'empresa.example',status:'approved',companyRole:'member'},
     superadmin:{status:'approved',role:'admin'}
   };
@@ -94,8 +95,10 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
     return {uid};
   }});
   let active=true;
+  let link;
   let registrations=0;
-  t.mock.method(globalThis,'fetch',async (url,{headers,body})=>{
+  t.mock.method(globalThis,'fetch',async (input,{headers,body})=>{
+    const url=new URL(input);
     if (url.hostname==='identitytoolkit.googleapis.com') {
       const input=JSON.parse(body);
       if (url.pathname.endsWith(':sendOobCode')) {
@@ -110,11 +113,21 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
       return Response.json({email:input.email,localId:'novo',idToken:'novo-token'});
     }
     const actor=headers.authorization.replace('Bearer ','');
+    if (url.pathname.endsWith('/documents:runQuery')) {
+      assert.equal(actor,'gestor');
+      return Response.json(link ? [{document:{name:'projects/test/documents/corporate_fleet_links/outra.example',
+        fields:{status:{stringValue:link.status}}}}] : [{}]);
+    }
     assert.match(url.href,/\/projects\/painel\/databases\/corporativo\/documents\//);
     const path=url.pathname.split('/documents/')[1];
     if (path.startsWith('users/')) {
       assert.equal(path,'users/'+actor);
       return Response.json({fields:Object.fromEntries(Object.entries(profiles[actor]).map(([key,stringValue])=>[key,{stringValue}]))});
+    }
+    if (path.startsWith('corporate_fleet_links/')) {
+      if (!active || !link || path!=='corporate_fleet_links/outra.example' || actor!=='gestor')
+        return new Response(null,{status:404});
+      return Response.json({fields:Object.fromEntries(Object.entries(link).map(([key,stringValue])=>[key,{stringValue}]))});
     }
     assert.ok(path.startsWith('corporate_companies/'));
     return Response.json({fields:{active:{booleanValue:active}}});
@@ -166,6 +179,21 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
   assert.equal((await call('accept',{actor:'admin',body:{token}})).status,403);
   assert.equal((await call('accept',{actor:'driver',body:{token}})).status,200);
   assert.equal((await (await call(path+'motoristas')).json()).members[0].status,'approved');
+  link={parentDomain:'empresa.example',status:'pending',childName:'Outra'};
+  const carrierPath='empresa/outra.example/';
+  assert.equal((await call(carrierPath+'motoristas')).status,403);
+  assert.equal((await call(carrierPath+'motoristas',{actor:'transportadora'})).status,200);
+  assert.equal((await call(path+'motoristas',{actor:'transportadora'})).status,403);
+  link={...link,status:'approved',scope:'drivers'};
+  await call('join',{actor:'driver',body:{code:'outro'}});
+  assert.equal((await call(carrierPath+'decisao',{body:{uid:'driver',status:'approved'}})).status,200);
+  assert.equal((await sendLocation(location,'outra')).status,200);
+  const aggregate=await (await call(path+'localizacoes?tree=1')).json();
+  assert.equal(aggregate[0].companyDomain,'outra.example');
+  assert.equal((await call(carrierPath+'motoristas',{actor:'comum'})).status,403);
+  link=undefined;
+  assert.equal((await call(carrierPath+'motoristas')).status,403);
+  assert.ok((await (await call(path+'localizacoes?tree=1')).json()).every(row=>row.companyDomain==='empresa.example'));
   const newPath='empresa/nova.example/';
   assert.equal((await call(newPath+'motoristas')).status,403);
   const first=await (await call(newPath+'motoristas',{actor:'superadmin'})).json();

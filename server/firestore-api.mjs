@@ -56,9 +56,28 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
         const [,domain,action]=corporateRoute;
         if (!corporateDomainPattern.test(domain)) throw new HttpError(400,'Identificador de empresa inválido.');
         if (method!==(['motoristas','localizacoes'].includes(action)?'GET':'POST')) throw new HttpError(405,'Método indisponível.');
-        const {company,user}=await corporate.authorize(domain,request.headers.get('authorization'));
+        const authorization=request.headers.get('authorization');
+        const {company,user,direct}=await corporate.authorize(domain,authorization);
         if (action==='motoristas') return reply({joinCode:company.joinCode,members:await access.members(user,company.id)});
-        if (action==='localizacoes' && tracking) return reply(await tracking.live(company.id));
+        if (action==='localizacoes' && tracking) {
+          const root=tracking.live(company.id);
+          if (!direct || new URL(request.url).searchParams.get('tree')!=='1') return reply(await root);
+          const branches=corporate.branches(domain,authorization).then(domains=>Promise.all(domains.map(async branch=>{
+            try {
+              const {company: carrier}=await corporate.authorize(branch,authorization);
+              return (await tracking.live(carrier.id)).map(position=>({...position,companyName:carrier.name,companyDomain:branch}));
+            } catch (error) {
+              if (error.status===403) return [];
+              throw error;
+            }
+          })));
+          const [local,descendants]=await Promise.all([root,branches]);
+          const positions=new Map();
+          for (const row of [...local.map(position=>({...position,companyName:company.name,companyDomain:domain})),...descendants.flat()]) {
+            if (!positions.has(row.uid) || positions.get(row.uid).updatedAt<row.updatedAt) positions.set(row.uid,row);
+          }
+          return reply([...positions.values()]);
+        }
         const input=await readBody(request);
         if (action==='convite') return reply(await access.invite(user,company.id,input.email,driverContact(input)));
         if (action==='cadastro') {

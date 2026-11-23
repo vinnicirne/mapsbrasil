@@ -68,9 +68,6 @@ textarea { resize: vertical; min-height: 90px; }
 .fleet-consent h2 { font-size: 1.05rem; }
 .fleet-consent p { font-size: .875rem; color: var(--muted); line-height: 1.45; margin: 8px 0 12px; }
 .fleet-consent-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.fleet-badge { position: absolute; z-index: 2; bottom: calc(var(--map-bottom) + 148px); right: 12px; display: grid; gap: 5px; justify-items: end; max-width: min(240px, 65%); font-size: .75rem; text-align: right; }
-.fleet-badge button { box-shadow: var(--shadow); }
-.fleet-status { padding: 6px 9px; border-radius: 8px; background: white; color: var(--dark); box-shadow: var(--shadow); }
 .plan { margin-top: 17px; }
 .plan > .primary { margin-top: 8px; }
 #start-nav { background: var(--dark); color: white; border-color: var(--dark); }

@@ -11,7 +11,7 @@ export function routeCoordinates(route,legIndex) {
     .flatMap(point=>point.map(value=>Number(value.toFixed(5))));
 }
 
-export function createTrackingControl({dialog,status,button,send,route,beforePrompt,latestFix}) {
+export function createTrackingControl({dialog,status,button,settings,send,route,beforePrompt,latestFix}) {
   const form=dialog.querySelector('form');
   const name=form.querySelector('input');
   const companyName=dialog.querySelector('#tracking-company');
@@ -27,7 +27,8 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
   function feedback(text) {
     status.textContent=text;
     status.hidden=!scope || !text;
-    button.textContent=active?'Parar compartilhamento':blocked?'Desbloquear localização':'Compartilhar GPS';
+    settings.hidden=!scope;
+    button.textContent=active?'Desativar localização':blocked?'Desbloquear localização':'Compartilhar GPS';
     button.hidden=!scope;
   }
 
@@ -36,6 +37,7 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
     if(!session) return;
     active=undefined;
     clearInterval(session.timer);
+    void session.wakeLock?.release().catch(()=>{});
     if (session.watch!==undefined) navigator.geolocation.clearWatch(session.watch);
     feedback('Compartilhamento encerrado.');
     if (!session.attemptedUpload) return;
@@ -55,12 +57,15 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
     });
     session.sending.then(()=>{
       session.sent=true;
-      if(active===session) feedback('GPS enviado para '+session.companyName+'.');
+      if(active===session) feedback('');
     }).catch(error=>{
       if (active!==session) return;
       if ([401,403].includes(error.status)) void stop();
       feedback(error.message || 'Não foi possível enviar a posição.');
-    }).finally(()=>{session.sending=undefined;});
+    }).finally(()=>{
+      session.sending=undefined;
+      if (active===session && session.needsFresh) refresh();
+    });
   }
 
   const geoOptions={enableHighAccuracy:true,maximumAge:5000,timeout:10000};
@@ -70,39 +75,69 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
     void stop();
     showBlockedPermission();
   }
-  function refresh() {
+  async function keepScreenAwake(session) {
+    if (document.hidden || !navigator.wakeLock || session.requestingWakeLock ||
+        (session.wakeLock && !session.wakeLock.released)) return;
+    session.requestingWakeLock=true;
+    try {
+      const lock=await navigator.wakeLock.request('screen');
+      if (active===session && !document.hidden) session.wakeLock=lock;
+      else await lock.release();
+    } catch { /* The device controls when a screen lock is available. */ }
+    finally {session.requestingWakeLock=false;}
+  }
+
+  function refresh(fresh=false) {
     const session=active;
-    if (!session || session.locating || session.sending || document.hidden) return;
+    if (!session || document.hidden) return;
+    if (fresh) session.needsFresh=true;
+    if (session.locating || session.sending) return;
     if (!navigator.onLine) return feedback('Sem internet. A empresa aguarda uma posição atualizada.');
+    fresh=session.needsFresh===true;
+    session.needsFresh=false;
     const navigationFix=latestFix();
     const fix=(!session.fix || navigationFix?.timestamp>session.fix.timestamp) ? navigationFix : session.fix;
-    if (session.watch!==undefined && fix && Date.now()-fix.timestamp<20000) return publish(session,fix);
+    if (!fresh && session.watch!==undefined && fix && Date.now()-fix.timestamp<20000) return publish(session,fix);
     session.locating=true;
     navigator.geolocation.getCurrentPosition(fix=>{
       session.locating=false;
-      if (active!==session) return;
-      session.fix=fix;
-      publish(session,fix);
-      if (session.watch===undefined) {
-        session.watch=navigator.geolocation.watchPosition(next=>{
-          session.fix=next;
-          if(!session.sent) publish(session,next);
-        },error=>failedFix(session,error),geoOptions);
-      }
+      acceptFix(session,fix);
     },error=>{
       session.locating=false;
       failedFix(session,error);
-    },geoOptions);
+      if (active===session && session.needsFresh) refresh();
+    },fresh?{...geoOptions,maximumAge:0}:geoOptions);
   }
 
-  function start() {
+  function acceptFix(session,fix) {
+    if (active!==session) return;
+    session.fix=fix;
+    void keepScreenAwake(session);
+    if (session.watch===undefined) {
+      session.watch=navigator.geolocation.watchPosition(next=>{
+        session.fix=next;
+        if(!session.sent) publish(session,next);
+      },error=>failedFix(session,error),geoOptions);
+    }
+    if (session.needsFresh) refresh();
+    else publish(session,fix);
+  }
+
+  async function start() {
     if (!scope || active) return;
     attempted=true;
     blocked=false;
     if (!navigator.geolocation) return feedback('GPS indisponível neste navegador.');
-    const session=active={id:crypto.randomUUID(),company:scope.id,companyName:scope.companyName,
+    const session=active={id:crypto.randomUUID(),company:scope.id,
       name:preference.name,timer:setInterval(refresh,interval)};
     feedback('Obtendo posição do GPS…');
+    const knownFix=latestFix();
+    if (knownFix && Date.now()-knownFix.timestamp<10000) {
+      const permission=await navigator.permissions?.query({name:'geolocation'}).catch(()=>undefined);
+      if (active!==session) return;
+      if (permission?.state==='denied') return failedFix(session,{code:1});
+      if (permission?.state==='granted') return acceptFix(session,knownFix);
+    }
     refresh();
   }
 
@@ -123,7 +158,7 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
 
   async function resume() {
     if (!scope || document.hidden || !navigator.onLine) return;
-    if(active) return refresh();
+    if(active) return refresh(true);
     if(attempted) return;
     if(!preference) return prompt();
     if(!preference.enabled) return;
@@ -163,7 +198,8 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
     prompt();
   };
   window.addEventListener('online',resume);
-  window.addEventListener('offline',refresh);
+  window.addEventListener('pageshow',event=>{if(event.persisted) void resume();});
+  window.addEventListener('offline',()=>refresh());
   document.addEventListener('visibilitychange',resume);
   return {
     stop,refresh,
