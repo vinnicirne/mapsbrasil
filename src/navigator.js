@@ -37,13 +37,14 @@ const outputTemplate=`
   </dialog>
   <dialog class="fleet-consent" id="tracking-consent" aria-labelledby="tracking-title" aria-describedby="tracking-description">
     <form id="tracking-form">
-      <h2 id="tracking-title">Compartilhar GPS com <span id="tracking-company"></span></h2>
-      <p id="tracking-description">A empresa verá sua posição e a rota em andamento enquanto o Drive estiver visível e conectado. Se você autorizar, o envio será retomado ao reabrir o app nesta empresa. Você pode interromper pelo botão no mapa.</p>
+      <h2 id="tracking-title">Permitir localização</h2>
+      <p id="tracking-description">Permita o acesso à localização quando o navegador pedir. <strong id="tracking-company"></strong> verá sua posição e a rota em andamento enquanto o Drive estiver visível e conectado. O envio será retomado ao reabrir o app para esta empresa. Você pode parar pelo botão no mapa.</p>
+      <p id="tracking-permission-help" role="alert" hidden>A localização está bloqueada. Nas permissões do site ou do app, libere a localização. Depois, volte ao Drive e toque em Tentar novamente.</p>
       <label for="tracking-name">Seu nome</label>
       <input id="tracking-name" required maxlength="100" autocomplete="name">
       <div class="fleet-consent-actions">
         <button class="secondary" id="tracking-decline" type="button" autofocus>Agora não</button>
-        <button class="primary" type="submit">Permitir e compartilhar</button>
+        <button class="primary" type="submit">Permitir localização</button>
       </div>
     </form>
   </dialog>

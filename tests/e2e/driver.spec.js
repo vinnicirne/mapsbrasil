@@ -89,7 +89,7 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   expect(await livePositions()).toEqual([]);
   await page.getByRole('button',{name:'Compartilhar GPS'}).click();
   await page.getByLabel('Seu nome').fill('Motorista de teste');
-  await page.getByRole('button',{name:'Permitir e compartilhar'}).click();
+  await page.getByRole('button',{name:'Permitir localização'}).click();
   await expect.poll(async()=>(await livePositions())[0]?.name).toBe('Motorista de teste');
   const firstLocation=(await livePositions())[0];
   expect(firstLocation.position).toEqual(origin);
@@ -264,11 +264,11 @@ test('Drive solicita consentimento e retoma o GPS somente para a conta e a empre
   const tracking=(request)=>request.method()==='POST' && new URL(request.url()).pathname.endsWith('/tracking');
   await page.goto('/');
   await page.getByRole('button',{name:'Entrar como motorista'}).click();
-  const permission=page.getByRole('dialog',{name:'Compartilhar GPS com Operação Rio do Ouro'});
+  const permission=page.getByRole('dialog',{name:'Permitir localização'});
   await expect(permission).toBeVisible();
   expect(requests).toEqual([]);
   const first=page.waitForRequest(request=>tracking(request) && !request.postDataJSON().stop);
-  await permission.getByRole('button',{name:'Permitir e compartilhar'}).click();
+  await permission.getByRole('button',{name:'Permitir localização'}).click();
   const session=(await first).postDataJSON().session;
   await expect(page.locator('#tracking-status')).toHaveText('GPS enviado para Operação Rio do Ouro.');
 
@@ -286,7 +286,7 @@ test('Drive solicita consentimento e retoma o GPS somente para a conta e a empre
   });
   await page.route('**/api/companies/outra/pack',route=>route.fulfill({json:null}));
   await page.reload();
-  await expect(page.getByRole('dialog',{name:'Compartilhar GPS com '+otherCompany})).toBeVisible();
+  await expect(permission).toContainText(otherCompany);
   expect(requests).toHaveLength(countBeforeSwitch);
   await page.getByRole('button',{name:'Agora não'}).click();
   await page.unroute('**/api/me');
@@ -305,15 +305,31 @@ test('Drive solicita consentimento e retoma o GPS somente para a conta e a empre
   expect(requests.filter(entry=>!entry.stop).every(entry=>entry.position.length===2)).toBe(true);
 
   await page.addInitScript(()=>{
-    const deny=(_,failure)=>queueMicrotask(()=>failure({code:1}));
-    navigator.geolocation.getCurrentPosition=deny;
-    navigator.geolocation.watchPosition=(success,failure)=>{deny(success,failure);return 1;};
+    const locate=navigator.geolocation.getCurrentPosition.bind(navigator.geolocation);
+    const query=navigator.permissions.query.bind(navigator.permissions);
+    navigator.permissions.query=options=>options.name==='geolocation' && sessionStorage.getItem('gps-blocked')
+      ? Promise.resolve({state:'denied'}) : query(options);
+    navigator.geolocation.getCurrentPosition=(success,failure,options)=>{
+      if (!sessionStorage.getItem('gps-blocked')) return locate(success,failure,options);
+      queueMicrotask(()=>failure({code:1}));
+    };
   });
+  await page.evaluate(()=>sessionStorage.setItem('gps-blocked','1'));
   await page.reload();
   await page.getByRole('button',{name:'Compartilhar GPS'}).click();
-  await permission.getByRole('button',{name:'Permitir e compartilhar'}).click();
-  await expect(page.locator('#tracking-status')).toHaveText('Autorize a localização no navegador para compartilhar.');
+  await permission.getByRole('button',{name:'Permitir localização'}).click();
+  await expect(permission.getByRole('alert')).toContainText('Nas permissões do site ou do app');
   expect(requests).toHaveLength(count);
+  await page.reload();
+  await expect(permission.getByRole('alert')).toBeVisible();
+  expect(requests).toHaveLength(count);
+
+  await page.evaluate(()=>sessionStorage.removeItem('gps-blocked'));
+  const recovered=page.waitForRequest(request=>tracking(request) && !request.postDataJSON().stop);
+  await permission.getByRole('button',{name:'Tentar novamente'}).click();
+  await recovered;
+  await expect(permission).toBeHidden();
+  await expect(page.locator('#tracking-status')).toHaveText('GPS enviado para Operação Rio do Ouro.');
   await context.close();
 });
 

@@ -15,7 +15,9 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
   const form=dialog.querySelector('form');
   const name=form.querySelector('input');
   const companyName=dialog.querySelector('#tracking-company');
-  let scope,active,preference,attempted=false;
+  const permissionHelp=dialog.querySelector('#tracking-permission-help');
+  const allow=form.querySelector('button[type="submit"]');
+  let scope,active,preference,attempted=false,blocked=false;
 
   function remember(value) {
     preference=value;
@@ -25,7 +27,7 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
   function feedback(text) {
     status.textContent=text;
     status.hidden=!scope || !text;
-    button.textContent=active?'Parar compartilhamento':'Compartilhar GPS';
+    button.textContent=active?'Parar compartilhamento':blocked?'Desbloquear localização':'Compartilhar GPS';
     button.hidden=!scope;
   }
 
@@ -34,7 +36,7 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
     if(!session) return;
     active=undefined;
     clearInterval(session.timer);
-    navigator.geolocation.clearWatch(session.watch);
+    if (session.watch!==undefined) navigator.geolocation.clearWatch(session.watch);
     feedback('Compartilhamento encerrado.');
     if (!session.attemptedUpload) return;
     try {
@@ -64,8 +66,9 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
   const geoOptions={enableHighAccuracy:true,maximumAge:5000,timeout:10000};
   function failedFix(session,error) {
     if(active!==session) return;
-    if(error.code===1) void stop();
-    feedback(error.code===1?'Autorize a localização no navegador para compartilhar.':'Aguardando sinal de GPS…');
+    if(error.code!==1) return feedback('Aguardando sinal de GPS…');
+    void stop();
+    showBlockedPermission();
   }
   function refresh() {
     const session=active;
@@ -73,12 +76,19 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
     if (!navigator.onLine) return feedback('Sem internet. A empresa aguarda uma posição atualizada.');
     const navigationFix=latestFix();
     const fix=(!session.fix || navigationFix?.timestamp>session.fix.timestamp) ? navigationFix : session.fix;
-    if (fix && Date.now()-fix.timestamp<20000) return publish(session,fix);
+    if (session.watch!==undefined && fix && Date.now()-fix.timestamp<20000) return publish(session,fix);
     session.locating=true;
     navigator.geolocation.getCurrentPosition(fix=>{
       session.locating=false;
+      if (active!==session) return;
       session.fix=fix;
       publish(session,fix);
+      if (session.watch===undefined) {
+        session.watch=navigator.geolocation.watchPosition(next=>{
+          session.fix=next;
+          if(!session.sent) publish(session,next);
+        },error=>failedFix(session,error),geoOptions);
+      }
     },error=>{
       session.locating=false;
       failedFix(session,error);
@@ -88,29 +98,46 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
   function start() {
     if (!scope || active) return;
     attempted=true;
+    blocked=false;
     if (!navigator.geolocation) return feedback('GPS indisponível neste navegador.');
     const session=active={id:crypto.randomUUID(),company:scope.id,companyName:scope.companyName,
       name:preference.name,timer:setInterval(refresh,interval)};
     feedback('Obtendo posição do GPS…');
-    session.watch=navigator.geolocation.watchPosition(fix=>{
-      session.fix=fix;
-      if(!session.sent) publish(session,fix);
-    },error=>failedFix(session,error),geoOptions);
     refresh();
   }
 
   function prompt() {
-    if (!scope || dialog.open) return;
+    if (!scope) return;
+    permissionHelp.hidden=!blocked;
+    allow.textContent=blocked?'Tentar novamente':'Permitir localização';
+    if(dialog.open) return;
     beforePrompt();
     dialog.showModal();
   }
 
-  function resume() {
+  function showBlockedPermission() {
+    blocked=true;
+    feedback('Localização bloqueada.');
+    prompt();
+  }
+
+  async function resume() {
     if (!scope || document.hidden || !navigator.onLine) return;
     if(active) return refresh();
     if(attempted) return;
-    if(preference?.enabled) start();
-    else if(!preference) prompt();
+    if(!preference) return prompt();
+    if(!preference.enabled) return;
+
+    attempted=true;
+    const currentScope=scope;
+    const permission=await navigator.permissions?.query({name:'geolocation'}).catch(()=>undefined);
+    if (currentScope!==scope || dialog.open || document.hidden || !navigator.onLine) {
+      if (currentScope===scope && !dialog.open) attempted=false;
+      return;
+    }
+    if (permission?.state==='denied') return showBlockedPermission();
+    if (permission?.state==='prompt') return prompt();
+    start();
   }
 
   function decline() {
@@ -147,6 +174,7 @@ export function createTrackingControl({dialog,status,button,send,route,beforePro
       void stop();
       scope=context && {...context,key};
       attempted=false;
+      blocked=false;
       preference=undefined;
       if(scope) {
         try {
