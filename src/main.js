@@ -177,12 +177,14 @@ function showConnectionError() {
 
 async function boot() {
   try { snapshot=await loadSnapshot(); } catch(error) {report(error);}
+  navigatorUI.setDemo(snapshot?.demo===true);
   apiResponded=false;
   try {
     const result=await fetch('/api/config',{cache:'no-store',signal:AbortSignal.timeout(10000)});
     apiResponded=true;
     if (!result.ok) throw Error('Serviço indisponível.');
     config=await result.json();
+    navigatorUI.setDemo(config.demo===true);
     auth=await connectAuth(config);
     if (auth && localStorage.getItem('mapsbrasil-signout')) {
       await auth.logout();
@@ -323,7 +325,7 @@ async function download() {
   const lease=await apiFor('lease',{method:'POST',body:{version:pack.version}});
   if (active!==company || !profile) throw Error('A empresa mudou durante o download.');
   const previous=snapshot?.company===active && snapshot?.pack.version===pack.version ? snapshot : null;
-  const next={...previous,pack,lease,uid:profile.user.uid,company:active,companyName:profile.memberships.find(item=>item.company===active).name};
+  const next={...previous,pack,lease,demo:config?.demo===true,uid:profile.user.uid,company:active,companyName:profile.memberships.find(item=>item.company===active).name};
   await saveSnapshot(next);
   snapshot=next;
   $('sample-label').hidden=pack.riskMode!=='sample';

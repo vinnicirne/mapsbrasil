@@ -101,7 +101,10 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect.poll(livePositions).toEqual([]);
   await locate(driver,origin);
   await page.getByRole('button',{name:'Encerrar'}).click();
+  await expect(page.getByText('Navegação encerrada.',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('Para onde você vai?')).toHaveValue('');
   await openMenu.click();
+  await expect(page.locator('#itinerary li')).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Atualizar região'})).toBeVisible();
   await page.unroute('**/api/companies/piloto/search');
   await expect(page.getByText('Áreas de risco simuladas',{exact:true})).toBeVisible();
@@ -164,8 +167,8 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await locate(driver,second);
   await expect(page.locator('#nav-notice')).toHaveText('Trajeto recalculado no aparelho.');
   await locate(driver,destination);
-  await expect(page.locator('#turn-name')).toHaveText('Rota concluída');
-  await expect(page.locator('#itinerary')).toContainText('Entrega de teste · concluída');
+  await expect(page.getByText('Rota concluída.',{exact:true})).toBeVisible();
+  await expect(page.locator('#itinerary li')).toHaveCount(0);
   expect(errors).toEqual([]);
 
   await driver.setOffline(false);
@@ -198,8 +201,8 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await expect(page.locator('#itinerary')).toContainText('Primeira · concluída');
   await expect(page.locator('#travel-distance')).toContainText('Parada 2');
   await locate(driver,destination);
-  await expect(page.locator('#turn-name')).toHaveText('Rota concluída');
-  await expect(page.locator('#itinerary')).toContainText('Segunda · concluída');
+  await expect(page.getByText('Rota concluída.',{exact:true})).toBeVisible();
+  await expect(page.locator('#itinerary li')).toHaveCount(0);
   expect(errors).toEqual([]);
   const saoPaulo=[-46.658,-23.558];
   const destino=[-46.652,-23.562];
@@ -240,6 +243,33 @@ test('autocadastro, aprovação por empresa e navegação offline com manobras, 
   await openMenu.click();
   await page.getByRole('button',{name:'Iniciar navegação',exact:true}).click();
   await expect(page.locator('#travel-distance')).toContainText('Parada 1');
+  await page.getByRole('button',{name:'Encerrar'}).click();
+  await page.reload();
+  await expect(field).toBeVisible();
+  await expect(page.locator('#itinerary li')).toHaveCount(0);
+  await expect(page.locator('#offline-map-note')).toBeHidden();
+
+  // Simulate an offline production install carrying the old demonstration trip.
+  await page.evaluate(legacyRoute=>new Promise((resolve,reject)=>{
+    const open=indexedDB.open('mapsbrasil-offline',1);
+    open.onerror=()=>reject(open.error);
+    open.onsuccess=()=>{
+      const db=open.result;
+      const tx=db.transaction('state','readwrite');
+      const store=tx.objectStore('state');
+      const saved=store.get('turn');
+      saved.onsuccess=()=>store.put({...saved.result,demo:false,route:legacyRoute,legIndex:0,
+        stopsText:'Entrega de teste;-22.886991;-42.990098'},'turn');
+      tx.oncomplete=()=>{db.close();resolve();};
+      tx.onabort=()=>{db.close();reject(tx.error);};
+    };
+  }),router(origin,[driverStop]));
+  await page.reload();
+  await openMenu.click();
+  await expect(page.getByRole('button',{name:'Carregar rota de teste',includeHidden:true})).toBeHidden();
+  await expect(page.locator('#stops')).toHaveValue('');
+  await expect(page.locator('#itinerary li')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Atualizar região'})).toBeVisible();
   await company.close();
   await driver.close();
 });

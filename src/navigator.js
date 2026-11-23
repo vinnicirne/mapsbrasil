@@ -95,7 +95,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   const addressCache=new Map();
   let searchPosition, searchPositionAt=0, locating;
   const audio=new Audio();
-  let hasStoredPack=false,connected=false,nationalMap,nationalLoading,findLocal,factions,alertFactions,factionLoad,selectedSearchPoint,lastReroute=0,planning=false;
+  let hasStoredPack=false,connected=false,nationalMap,nationalLoading,findLocal,factions,alertFactions,factionLoad,selectedSearchPoint,lastReroute=0,planning=false,demo=false;
   const tracker=createTrackingControl({
     dialog:$('tracking-consent'),status:$('tracking-status'),button:$('tracking-stop'),send:sendTracking,
     route:()=>nav?routeCoordinates(route,legIndex):[],
@@ -294,7 +294,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     $('download').disabled=!online || !packInfo;
     $('download').textContent=hasStoredPack?'Atualizar região':'Baixar região';
     if (operationalLayer()) {enableNationalMap();loadFactions();}
-    $('sample-action').hidden=pack?.riskMode!=='sample' || operationalLayer();
+    $('sample-action').hidden=!demo || pack?.riskMode!=='sample' || operationalLayer();
     legend();
     redraw();
   }
@@ -317,7 +317,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     pack=newPack;
     loadFactions();
     legend();
-    $('sample-action').hidden=pack?.riskMode!=='sample' || operationalLayer();
+    $('sample-action').hidden=!demo || pack?.riskMode!=='sample' || operationalLayer();
     $('calculate').disabled=!pack;
     $('pick-origin').disabled=!pack;
     $('pick-stop').disabled=!pack;
@@ -519,22 +519,18 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
       progress=Math.max(progress,match.at);
       guidance(leg,match);
       if (distance(raw,leg.stop.point)<32 || (progress>=leg.meters-8 && match.distance<18)) {
-        if (!$('risk').dataset.new) voice('arrive','Chegada à parada '+leg.stop.name);
+        const announceArrival=!$('risk').dataset.new;
         legIndex++;completed++;progress=0;lastVoice=undefined;
+        if (legIndex===route.legs.length) {
+          finishNavigation('Rota concluída.');
+          if (announceArrival) voice('arrive','Chegada à parada '+leg.stop.name);
+          return;
+        }
+        if (announceArrival) voice('arrive','Chegada à parada '+leg.stop.name);
         itinerary();
         void save().catch(reportError);
-        if (legIndex===route.legs.length) {
-          stopNavigation();
-          $('turn-arrow').textContent=arrows.arrive;
-          $('turn-distance').textContent='';
-          $('turn-name').textContent='Rota concluída';
-          $('turn-road').textContent=completed+' parada(s) concluída(s)';
-          $('maneuver').hidden=false;
-          note('Rota concluída.');
-        } else {
-          const nextLeg=route.legs[legIndex];
-          guidance(nextLeg,projectProgress(nextLeg,raw));
-        }
+        const nextLeg=route.legs[legIndex];
+        guidance(nextLeg,projectProgress(nextLeg,raw));
       }
     }
     redraw();
@@ -589,16 +585,33 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     void wakeLock?.release().catch(()=>{});
     wakeLock=undefined;
     nav=false;
-    tracker.refresh();
     window.speechSynthesis?.cancel();
     audio.pause();
     container.classList.remove('navigating');
     $('maneuver').hidden=true; $('travel').hidden=true; $('risk').hidden=true;
     $('start-nav').disabled=false;
     $('calculate').disabled=!pack;
-    if (route?.profile==='national') map.fitRoute(route);
-    else if (pack) map.fit(pack);
+  }
+
+  function finishNavigation(message) {
+    stopNavigation();
+    resetTrip();
+    itinerary();
     redraw();
+    if (nationalVisible()) nationalMap.overview();
+    else if (pack) map.fit(pack);
+    $('destination-finder').querySelector('[role="status"]').textContent=message;
+    tracker.refresh();
+    void save().catch(reportError);
+  }
+
+  function resetTrip() {
+    route=origin=position=navigationFix=selectedDestination=selectedSearchPoint=undefined;
+    legIndex=completed=progress=bearing=0;
+    $('stops').value='';
+    $('origin-state').textContent='Origem pelo GPS';
+    finder.reset();
+    note('');
   }
 
   $('download').onclick=async ()=>{
@@ -628,6 +641,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   $('pick-stop').onclick=()=>pickPoint('stop');
   $('cancel-point').onclick=()=>{endPointSelection();openMenu();};
   $('sample').onclick=()=>{
+    if (!demo || pack?.riskMode!=='sample' || operationalLayer()) return;
     origin=[-42.996787,-22.888909];
     $('origin-state').textContent='Origem de teste carregada';
     $('stops').value='Entrega de teste;-22.886991;-42.990098';
@@ -635,7 +649,7 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
   };
   $('calculate').onclick=calculate;
   $('start-nav').onclick=startNavigation;
-  $('stop-nav').onclick=stopNavigation;
+  $('stop-nav').onclick=()=>finishNavigation('Navegação encerrada.');
   $('mute').onclick=()=>{
     muted=!muted;
     $('mute').textContent=muted?'Som desligado':'Som ligado';
@@ -654,20 +668,28 @@ export function makeNavigator(container, {download, prepareDestination, searchNa
     setTrackingCompany:tracker.setCompany,
     stopTracking:tracker.stop,
     setPackInfo,setNetwork,
+    setDemo(value) {demo=value;},
     previewPack(value) { if(!hasStoredPack) setPack(value,false); },
     restore(snapshot) {
       if (menu.open) menu.close();
       endPointSelection();
       stopNavigation();
-      route=snapshot?.route;origin=snapshot?.origin;position=undefined;navigationFix=undefined;selectedDestination=undefined;
-      finder.reset();
+      const finished=snapshot?.route && snapshot.legIndex>=snapshot.route.legs.length;
+      const legacyDemo=!demo && snapshot?.stopsText==='Entrega de teste;-22.886991;-42.990098';
+      resetTrip();
+      if (!finished && !legacyDemo) {
+        route=snapshot?.route;
+        origin=snapshot?.origin;
+        legIndex=snapshot?.legIndex ?? 0;
+        completed=snapshot?.completed ?? 0;
+        $('stops').value=snapshot?.stopsText ?? '';
+        $('origin-state').textContent=origin?'Origem salva':'Origem pelo GPS';
+      }
       addressCache.clear();
-      legIndex=snapshot?.legIndex ?? 0;completed=snapshot?.completed ?? 0;progress=0;
-      $('stops').value=snapshot?.stopsText ?? '';
-      $('origin-state').textContent=origin?'Origem salva':'Origem pelo GPS';
-      note('');
       setPack(snapshot?.pack);
       itinerary();
+      if (!route && nationalVisible()) nationalMap.overview();
+      if (finished || legacyDemo) void save().catch(reportError);
     },
     changePack(value) {
       route=undefined;legIndex=0;completed=0;progress=0;
