@@ -122,7 +122,46 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
           const [own,linked]=await Promise.all([local,loadBranches(list)]);
           return reply([...own,...linked].sort((left,right)=>right.createdAt-left.createdAt));
         }
-        if (action==='motoristas') return reply({joinCode:company.joinCode,members:await access.members(user,company.id)});
+        async function driverNetwork() {
+          const parent=url.searchParams.get('rede') || domain;
+          if (!corporateDomainPattern.test(parent)) throw new HttpError(400,'Domínio da rede inválido.');
+          const scope=parent===domain ? {company,user,direct} : await corporate.authorize(parent,authorization);
+          if (!scope.direct) {
+            if (parent!==domain) throw new HttpError(403,'Acesso restrito à empresa principal.');
+            return {parent,scope,branches:[]};
+          }
+          const branches=await corporate.branches(parent,authorization);
+          if (parent!==domain && !branches.includes(domain)) throw new HttpError(403,'A transportadora não pertence à rede.');
+          return {parent,scope,branches};
+        }
+
+        async function driverDestination(target) {
+          if (target===undefined || target===domain) return {company,user};
+          if (typeof target!=='string' || !corporateDomainPattern.test(target)) throw new HttpError(400,'Transportadora inválida.');
+          const {parent,scope,branches}=await driverNetwork();
+          if (!scope.direct || (target!==parent && !branches.includes(target))) {
+            throw new HttpError(403,'A transportadora precisa estar vinculada e aprovada nesta rede.');
+          }
+          return target===parent ? scope : corporate.authorize(target,authorization);
+        }
+
+        if (action==='motoristas') {
+          const members=await access.members(user,company.id);
+          if (url.searchParams.get('opcoes')!=='1') return reply({joinCode:company.joinCode,members});
+          const {parent,scope,branches}=await driverNetwork();
+          const destinations=[{domain,name:company.name}];
+          if (parent!==domain) destinations.push({domain:parent,name:scope.company.name});
+          const available=await Promise.all(branches.filter(branch=>branch!==domain).map(async branch=>{
+            try {
+              const {company:carrier}=await corporate.authorize(branch,authorization);
+              return {domain:branch,name:carrier.name};
+            } catch (error) {
+              if (error.status===403) return null;
+              throw error;
+            }
+          }));
+          return reply({joinCode:company.joinCode,members,destinations:[...destinations,...available.filter(Boolean)]});
+        }
         if (action==='localizacoes' && tracking) {
           const root=tracking.live(company.id);
           if (!direct || new URL(request.url).searchParams.get('tree')!=='1') return reply(await root);
@@ -136,18 +175,28 @@ export function createDriveHandler({access, firebase, packBytes, national, corpo
           return reply([...positions.values()]);
         }
         const input=await readBody(request);
-        if (action==='convite') return reply(await access.invite(user,company.id,input.email,driverContact(input)));
+        if (action==='convite') {
+          const target=await driverDestination(input.targetDomain);
+          return reply(await access.invite(target.user,target.company.id,input.email,driverContact(input)));
+        }
         if (action==='cadastro') {
           if (!registerDriver) throw new HttpError(503,'Cadastro direto indisponível.');
           const contact=driverContact(input);
+          const target=await driverDestination(input.targetDomain);
           const driver=await registerDriver(input.email,input.password);
           let linked=true;
-          try { await access.enroll(user,company.id,{...driver,...contact}); }
+          try { await access.enroll(target.user,target.company.id,{...driver,...contact}); }
           catch { linked=false; }
           return reply({email:driver.email,verificationSent:driver.verificationSent,linked},201);
         }
         if (typeof input.uid!=='string' || !input.uid || input.uid.length>128) throw new HttpError(400,'Conta inválida.');
-        if (action==='perfil') return reply({joinCode:company.joinCode,members:await access.editContact(user,company.id,input.uid,driverContact(input))});
+        if (action==='perfil') {
+          const contact=driverContact(input);
+          const target=await driverDestination(input.targetDomain);
+          const members=target.company.id===company.id ? await access.editContact(user,company.id,input.uid,contact)
+            : await access.transferDriver(user,company.id,target.user,target.company.id,input.uid,contact);
+          return reply({joinCode:company.joinCode,members});
+        }
         return reply({joinCode:company.joinCode,members:await access.depart(user,company.id,input.uid,input.status)});
       }
       const companyRoute=/^companies\/([\w-]+)\/(members|invite|decision|pack|lease|search|route|tracking|sos)$/.exec(endpoint);

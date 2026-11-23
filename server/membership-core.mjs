@@ -35,7 +35,7 @@ export function membershipService({store,companies,authenticate,privateKey}) {
   async function requireApproved(user,id) {
     if (!await getCompany(id) || (await store.get(id,user.uid))?.status!=='approved') throw new HttpError(403,'Seu vínculo ainda não foi aprovado.');
   }
-  const publicRow=({company,uid,email,status,requested,changed,driverName,driverPhone})=>({company,uid,email,status,requested,changed,driverName,driverPhone});
+  const publicRow=({company,uid,email,status,requested,changed,driverName,driverPhone,transferredTo})=>({company,uid,email,status,requested,changed,driverName,driverPhone,transferredTo});
   async function me(user) {
     const rows=(await store.list('uid',user.uid)).sort((a,b)=>a.requested-b.requested);
     const memberships=(await Promise.all(rows.map(async row=>{
@@ -86,6 +86,11 @@ export function membershipService({store,companies,authenticate,privateKey}) {
     await store.decide(company,uid,contact);
     return members(user,company);
   }
+  async function transferDriver(sourceUser,source,targetUser,target,uid,contact) {
+    await Promise.all([requireAdmin(sourceUser,source),requireAdmin(targetUser,target)]);
+    await store.transferDriver(source,target,uid,contact,sourceUser.uid,Date.now());
+    return members(sourceUser,source);
+  }
   async function acceptInvite(user,token) {
     if (typeof token!=='string' || !/^[\w-]{43}$/.test(token)) throw new HttpError(404,'Convite inválido.');
     const now=Date.now();
@@ -107,5 +112,5 @@ export function membershipService({store,companies,authenticate,privateKey}) {
     const signature=sign('sha256',Buffer.from(claims),{key:signingKey,dsaEncoding:'ieee-p1363'});
     return {claims,signature:signature.toString('base64url'),publicKey};
   }
-  return {authenticate,requireApproved,me,members,request,depart,invite,enroll,editContact,acceptInvite,lease};
+  return {authenticate,requireApproved,me,members,request,depart,invite,enroll,editContact,transferDriver,acceptInvite,lease};
 }

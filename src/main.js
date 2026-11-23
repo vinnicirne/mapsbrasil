@@ -9,7 +9,6 @@ root.innerHTML=`
     <a class="brand" href="/" aria-label="MapsBrasil Drive, início"><img src="/icons/icon-192.png" alt="" width="42" height="42"><span>MapsBrasil Drive</span></a>
     <div class="header-actions">
       <span id="network" class="network" aria-live="polite"><i></i><span>Online</span></span>
-      <a href="/gestao" id="manage-link" hidden>Gestão de motoristas</a>
       <a href="/" id="driver-link" hidden>Área do motorista</a>
       <button id="logout" type="button" hidden>Sair</button>
     </div>
@@ -167,7 +166,6 @@ function showSnapshot() {
   navigatorUI.restore(snapshot);
   navigatorUI.setPackInfo(null,false);
   $('logout').hidden=false;
-  $('manage-link').hidden=true;
 }
 
 function showConnectionError() {
@@ -240,7 +238,6 @@ async function refresh(updatedProfile) {
   if (sequence!==refreshSequence) return;
   serverReachable=true;
   $('logout').hidden=false;
-  $('manage-link').hidden=isManagement || profile.companies.length===0;
   $('driver-link').hidden=!isManagement;
   const approved=profile.memberships.filter(member=>member.status==='approved');
   if (snapshot && (snapshot.uid!==profile.user.uid || !approved.some(member=>member.company===snapshot.company))) await clearLocal();

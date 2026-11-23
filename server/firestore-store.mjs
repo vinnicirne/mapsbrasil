@@ -113,8 +113,26 @@ export function firestoreStore(database, namespace) {
     async decide(company,uid,decision) {
       const ref=member(company,uid);
       await database.runTransaction(async tx=>{
-        if (!(await tx.get(ref)).exists) throw new HttpError(404,'Vínculo não encontrado.');
+        const current=(await tx.get(ref)).data();
+        if (!current) throw new HttpError(404,'Vínculo não encontrado.');
+        if (current.transferredTo) throw new HttpError(409,'Este motorista foi transferido. Edite o vínculo na empresa atual.');
         tx.update(ref,decision);
+      });
+    },
+    async transferDriver(source,target,uid,contact,actor,changed) {
+      const original=member(source,uid);
+      const destination=member(target,uid);
+      await database.runTransaction(async tx=>{
+        const [from,to]=await Promise.all([tx.get(original),tx.get(destination)]);
+        const current=from.data();
+        const existing=to.data();
+        if (!current) throw new HttpError(404,'Vínculo não encontrado.');
+        if (current.transferredTo===target && existing && !existing.transferredTo) return;
+        if (!['pending','approved'].includes(current.status)) throw new HttpError(409,'Transfira um vínculo pendente ou aprovado.');
+        if (existing && existing.status!=='revoked') throw new HttpError(409,'O motorista já tem um vínculo na empresa de destino.');
+        tx.set(destination,{company:target,uid,email:current.email ?? '',status:current.status,
+          requested:current.requested ?? changed,changed,decided_by:actor,...contact});
+        tx.update(original,{status:'revoked',transferredTo:target,changed,decided_by:actor});
       });
     },
     async saveInvite(key,invite) { await invites.doc(key).create(invite); },
@@ -124,6 +142,7 @@ export function firestoreStore(database, namespace) {
         const grant=await inspect((await tx.get(ref)).data());
         const membership=member(grant.company,uid);
         const prev=(await tx.get(membership)).data();
+        if (prev?.transferredTo) throw new HttpError(409,'O motorista já foi transferido para outra empresa.');
         tx.set(membership,{...prev,...grant,requested:prev?.requested ?? grant.requested});
         tx.update(ref,{used:grant.changed});
       });

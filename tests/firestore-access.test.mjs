@@ -68,7 +68,17 @@ function memory() {
     decide(c,u,change) {
       const id=key(c,u);
       if (!members.has(id)) throw new HttpError(404,'Vínculo não encontrado.');
+      if (members.get(id).transferredTo) throw new HttpError(409,'Motorista transferido.');
       members.set(id,{...members.get(id),...change});
+    },
+    transferDriver(source,target,uid,contact,actor,changed) {
+      const original=key(source,uid),destination=key(target,uid);
+      const current=members.get(original),existing=members.get(destination);
+      if (!current) throw new HttpError(404,'Vínculo não encontrado.');
+      if (current.transferredTo===target && existing && !existing.transferredTo) return;
+      if (!['pending','approved'].includes(current.status) || (existing && existing.status!=='revoked')) throw new HttpError(409,'Conflito de vínculo.');
+      members.set(destination,{company:target,uid,email:current.email,status:current.status,requested:current.requested,changed,decided_by:actor,...contact});
+      members.set(original,{...current,status:'revoked',transferredTo:target,changed,decided_by:actor});
     },
     saveInvite:(id,row)=>invites.set(id,row),
     async consumeInvite(id,u,inspect) {
@@ -319,4 +329,34 @@ test('Painel Empresa usa o vínculo correto para convidar, aprovar e revogar mot
   assert.equal(row.driverPhone,'+5521988882222');
   assert.equal(row.password,undefined);
   assert.equal((await call(newPath+'cadastro',{actor:'superadmin',body:{...body,email:driver.email}})).status,409);
+  const rootOptions=path+'motoristas?opcoes=1';
+  link={parentDomain:'empresa.example',status:'pending',childName:'Outra'};
+  assert.deepEqual((await (await call(rootOptions)).json()).destinations.map(item=>item.domain),['empresa.example']);
+  const target={targetDomain:'outra.example'};
+  const edit={uid:'mover',name:'Motorista transferido',phone:'21999999999',...target};
+  await store.request({company:'empresa',uid:edit.uid,email:'mover@example.test',status:'approved',requested:Date.now()});
+  assert.equal((await call(path+'perfil',{body:edit})).status,403);
+
+  link={...link,status:'approved',scope:'drivers'};
+  assert.deepEqual((await (await call(rootOptions)).json()).destinations.map(item=>item.domain),['empresa.example','outra.example']);
+  assert.equal((await call(path+'perfil',{body:{...edit,targetDomain:'nova.example'}})).status,403);
+  assert.equal((await call(path+'perfil',{body:{...edit,uid:driver.uid}})).status,409);
+  assert.equal((await call(carrierPath+'perfil?rede=empresa.example',{actor:'transportadora',body:{...edit,targetDomain:'empresa.example'}})).status,403);
+  assert.equal((await call(path+'perfil',{body:edit})).status,200);
+  assert.equal((await call(path+'perfil',{body:edit})).status,200);
+  assert.equal(store.get('empresa',edit.uid).transferredTo,'outra');
+  assert.equal(store.get('outra',edit.uid).driverName,edit.name);
+  assert.equal((await call(path+'decisao',{body:{uid:edit.uid,status:'approved'}})).status,409);
+  assert.equal((await call(carrierPath+'perfil?rede=empresa.example',{body:{...edit,targetDomain:'empresa.example'}})).status,200);
+  assert.equal(store.get('empresa',edit.uid).status,'approved');
+  assert.equal(store.get('outra',edit.uid).transferredTo,'empresa');
+  const count=registrations;
+  assert.equal((await call(path+'cadastro',{body:{...body,targetDomain:'nova.example'}})).status,403);
+  assert.equal(registrations,count);
+  assert.equal((await call(path+'cadastro',{body:{...body,...target}})).status,201);
+  assert.equal(store.get('outra','novo').status,'approved');
+  assert.equal(store.get('empresa','novo'),undefined);
+  const targeted=await (await call(path+'convite',{body:{email:driver.email,...target}})).json();
+  assert.equal((await call('accept',{actor:'driver',body:targeted})).status,200);
+  assert.equal(store.get('outra',driver.uid).status,'approved');
 });
